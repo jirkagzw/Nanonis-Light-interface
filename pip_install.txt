@@ -1,0 +1,2 @@
+cd C:\Users\jirka\OneDrive - Univerzita Karlova\UOCHAB\Scripts\Nanonis-TCP-client-main\
+pip install .
