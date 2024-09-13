@@ -298,7 +298,7 @@ class photon_meas:
         new_y = y + dy_rot
         self.connect.FolMeXYPosSet(new_x, new_y, wait)
         
-    def mv_current_nA(self,spd=None,cus_spd=True,protection=True):
+    def mv_spd(self,spd=None,cus_spd=True,protection=True):
         """
         Sets the linear speed in Follow me.
         Parameters
