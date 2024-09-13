@@ -5,6 +5,8 @@
 '''
 import pandas as pd
 import numpy as np
+import os
+import re
 
 class nanonis_ctrl:
     # Class variables
@@ -13,13 +15,125 @@ class nanonis_ctrl:
     #   tcp.nanonis_ctrl.if_print = True
     if_print = False
     # Functions
-    def __init__(self, tcp):
+    def __init__(self, tcp,PLL_modulator_index=1):
         self.tcp = tcp
         # self.f_print = False
+        self.mod_index=PLL_modulator_index
 
 # it is recommended to construct body first so that you don't need to calculate the body size by yourself
 # SI units are used in this module
 ######################################## Bias Module #############################################
+
+
+
+
+    def get_next_filename(self,base_name, extension=".dat", folder="."):
+        # Pattern to match filenames with number
+        pattern = re.compile(rf'{re.escape(base_name)}(\d{{5}})\{extension}')
+        
+        # Get all files in the directory with the relevant pattern
+        numbers = [
+            int(match.group(1)) 
+            for file in os.listdir(folder)
+            if (match := pattern.match(file)) is not None
+        ]
+        
+        # Determine the next number (starting from 1 if no files exist)
+        next_number = max(numbers, default=0) + 1
+        # Format number with leading zeros
+        filename_number = f'{next_number:05}'
+        
+        # Construct new filename
+        new_filename = f'{base_name}{filename_number}{extension}'
+        return os.path.join(folder,new_filename)
+    
+    def writesxm(self,backward,pathname, header, scan_par, channels, data2d):
+        """
+        Writes a Nanonis file from map data. The file is saved with the given filename at the specified path.
+        
+        Parameters:
+        - path (str): Directory path where the file will be saved.
+        - filename (str): Name of the file to be created.
+        - header (dict): Dictionary containing header information to be written to the file.
+        - scan_par (dict): Dictionary containing scan parameters to be written to the file.
+        - channels (list of lists): 2D list representing channel data to be written to the file.
+        - *argv: Additional numpy arrays to be written to the file.
+        """
+        scan_pixels_str = scan_par["SCAN_PIXELS"]
+        pixels = tuple(map(int, scan_pixels_str.split("\t")))  # Converts "10\t10" to (10, 10)
+
+        # Set the direction flag
+        direction = True if scan_par["SCAN_DIR"] == "down" else False
+        
+        # Open the file in binary write mode
+        fn = open(pathname, mode='wb')
+        
+        # Write the Nanonis version information
+        fn.write((":NANONIS_VERSION:\n").encode('utf-8'))
+        fn.write(("2\n").encode('utf-8'))  # Assuming version 2 is being used
+        
+        # Write the scan type information
+        fn.write((":SCANIT_TYPE:\n").encode('utf-8'))
+        fn.write(("\tFLOAT\tMSBFIRST\n").encode('utf-8'))
+        
+        # Write the scan parameters
+        for key in scan_par:
+            print(key)  # Print the current key to the console (for debugging or logging)
+            fn.write((":" + key + ":\n").encode('utf-8'))
+            fn.write((scan_par[key] + "\n").encode('utf-8'))
+        
+        # Write the header information
+        for key in header:
+            fn.write((":" + key + ":\n").encode('utf-8'))
+            fn.write((header[key] + "\n").encode('utf-8'))
+        
+        # Write data information header
+        fn.write((":DATA_INFO:\n").encode('utf-8'))
+        fn.write(("\tChannel\tName\tUnit\tDirection\tCalibration\tOffset\n").encode('utf-8'))
+        
+        C = data2d.shape[0]  # Number of channels (C)
+        L = data2d.shape[1]  # Number of elements (L), which should be equal to pix_tuple[0] * pix_tuple[1]
+
+        # Reshape the data to (C x pix_tuple[0] x pix_tuple[1])
+        if backward==False:
+            data = np.reshape(data2d, (C, pixels[1], pixels[0]))
+        else:
+            data = np.reshape(data2d, (C, pixels[1],2*pixels[0]))
+            array1 = data[:,:,:pixels[0]]
+            array2 = data[:,:,pixels[0]:]
+            data = np.stack([array1,array2], axis=-1)
+        # Write the channel data
+        for j in range(len(channels)):
+            for i in range(len(channels[0])):
+                fn.write(("\t").encode('utf-8'))
+                fn.write((str(channels[j][i])).encode('utf-8'))
+            fn.write(("\n").encode('utf-8'))   
+        
+        # End of the data section
+        fn.write(("\n").encode('utf-8'))
+        fn.write((":SCANIT_END:\n\n\n").encode('utf-8'))
+        
+        # Write control characters
+        fn.write(bytes([26]))  # ASCII control character for 'substitute' (often used as EOF marker)
+        fn.write(bytes([4]))   # ASCII control character for 'end of transmission'
+        
+        # Write additional data arrays
+    
+        for i in range(0,len(data)):
+           # if direction==False:
+            if backward==False:
+                data[i, :, :].astype(">f4").tofile(fn)  # Convert array to big-endian 32-bit float and write to file
+                data[i, :, ::-1].astype(">f4").tofile(fn)
+            else:
+                data[i, :, :,0].astype(">f4").tofile(fn)  # Convert array to big-endian 32-bit float and write to file
+                data[i, :, :,1].astype(">f4").tofile(fn)
+           # else:
+            #    data[i, ::-1, :].astype(">f4").tofile(fn)  # Convert array to big-endian 32-bit float and write to file
+             #   data[i, ::-1, ::-1].astype(">f4").tofile(fn)
+        
+        # Close the file
+        fn.close()
+        return (data)
 
     def BiasSet(self, bias, prt=if_print):
         """
@@ -1327,7 +1441,124 @@ class nanonis_ctrl:
         None
         """
         return
+    ######################################## Piezos module #############################################
+    def PiezoDriftCompSet(self,compensation,Vx,Vy,Vz,sat_limit, prt=if_print):
+        """
+        Configures the drift compensation parameters.
+        Arguments:
+        - Compensation on/off (int) activates or deactivates the drift compensation, where -1=no change, 0=Off,
+        1=On
+        - Vx (m/s) (float32) is the linear speed applied to the X piezo to compensate the drift
+        - Vy (m/s) (float32) is the linear speed applied to the Y piezo to compensate the drift
+        - Vz (m/s) (float32) is the linear speed applied to the Z piezo to compensate the drift
+        - Saturation limit (%) (float32) is the drift saturation limit in percent of the full piezo range and it applies to
+        all axes
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+       # compensation=self.tcp.tristate_cvt_2(compensation)
+        Vx = self.tcp.unit_cvt(Vx)
+        Vy = self.tcp.unit_cvt(Vy)
+        Vz = self.tcp.unit_cvt(Vz)
+        sat_limit = self.tcp.unit_cvt(sat_limit)
 
+        body  = self.tcp.dtype_cvt(compensation,'int', 'bin')
+        body += self.tcp.dtype_cvt(Vx, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(Vy, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(Vz, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(sat_limit, 'float32', 'bin')
+        
+        header = self.tcp.header_construct('Piezo.DriftCompSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+     #   if prt: 
+    #        print('\n'+
+    #            scan_frame_df.to_string(header=False)+
+    #            '\n\nScan frame set.')
+     #   return scan_frame_df
+        
+    def PiezoDriftCompGet(self, prt=if_print):
+        """
+        Configures the drift compensation parameters.
+        Arguments:
+        None
+        Return arguments :
+            - Compensation status (unsigned int32) indicates whether the drift compensation is On or Off
+           - Vx (m/s) (float32) is the linear speed applied to the X piezo to compensate the drift
+           - Vy (m/s) (float32) is the linear speed applied to the Y piezo to compensate the drift
+           - Vz (m/s) (float32) is the linear speed applied to the Z piezo to compensate the drift
+           - X saturated status (unsigned int32) indicates if the X drift correction reached 10% of the piezo range.
+           When this happens, the drift compensation stops for this axis and its LED turns on. To reactivate the
+           compensation, switch the drift compensation off and on
+           - Y saturated status (unsigned int32) indicates if the Y drift correction reached 10% of the piezo range.
+           When this happens, the drift compensation stops for this axis and its LED turns on. To reactivate the
+           compensation, switch the drift compensation off and on
+           - Z saturated status (unsigned int32) indicates if the Z drift correction reached 10% of the piezo range.
+           When this happens, the drift compensation stops for this axis and its LED turns on. To reactivate the
+           compensation, switch the drift compensation off and on
+           - Saturation limit (%) (float32) is the drift saturation limit in percent of the full piezo range and it applies to
+           all axes
+           - Error described in the Response message>Body section
+            if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        header = self.tcp.header_construct('Piezo.DriftCompGet', body_size = 0)
+    
+        self.tcp.cmd_send(header)
+        
+        _, res_arg, res_err = self.tcp.res_recv('uint32', 'float32','float32','float32', 'uint32', 'uint32', 'uint32')
+        self.tcp.print_err(res_err)
+    
+       # self.tcp.print_err(res_err)
+        set_df = pd.DataFrame({'Compensation status': self.tcp.bistate_cvt(res_arg[0]), 
+                                 'Vx (m/s)': res_arg[1], 
+                                 'Vy (m/s)': res_arg[2], 
+                                 'Vz (m/s)': res_arg[3], 
+                                 'X saturated status': self.tcp.bistate_cvt(res_arg[4]),
+                                 'Y saturated status': self.tcp.bistate_cvt(res_arg[5]), 
+                                 'Z saturated status': self.tcp.bistate_cvt(res_arg[6]),  },                            
+                                 index=[0]).T
+                               #  'Saturation limit (%)': res_arg[7]}, 
+    
+        if prt: 
+            print('\n'+
+                set_df.to_string(header=False)+
+                '\n\nDrift compensation settings returned returned.')
+        return set_df   
+    
+    def PiezoDriftCompGet_test(self, prt=if_print):
+        """
+        Configures the drift compensation parameters.
+        Arguments:
+        None
+        Return arguments :
+            - Compensation status (unsigned int32) indicates whether the drift compensation is On or Off
+           - Vx (m/s) (float32) is the linear speed applied to the X piezo to compensate the drift
+           - Vy (m/s) (float32) is the linear speed applied to the Y piezo to compensate the drift
+           - Vz (m/s) (float32) is the linear speed applied to the Z piezo to compensate the drift
+           - X saturated status (unsigned int32) indicates if the X drift correction reached 10% of the piezo range.
+           When this happens, the drift compensation stops for this axis and its LED turns on. To reactivate the
+           compensation, switch the drift compensation off and on
+           - Y saturated status (unsigned int32) indicates if the Y drift correction reached 10% of the piezo range.
+           When this happens, the drift compensation stops for this axis and its LED turns on. To reactivate the
+           compensation, switch the drift compensation off and on
+           - Z saturated status (unsigned int32) indicates if the Z drift correction reached 10% of the piezo range.
+           When this happens, the drift compensation stops for this axis and its LED turns on. To reactivate the
+           compensation, switch the drift compensation off and on
+           - Saturation limit (%) (float32) is the drift saturation limit in percent of the full piezo range and it applies to
+           all axes
+           - Error described in the Response message>Body section
+            if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        header = self.tcp.header_construct('Piezo.DriftCompGet', body_size = 0,res=0)
+    
+        self.tcp.cmd_send(header)
+       
+        return(self.tcp.sk.recv(self.tcp.buffersize))
     ######################################## Safe Tip Module #############################################
     ######################################## Auto Approach Module #############################################
     ######################################## Scan Module #############################################
@@ -3019,6 +3250,69 @@ class nanonis_ctrl:
               '\n\nData Logger properties returned.')
         return datalog_props_df
         
+######################################## PLL Module #############################################   
+    def PLLCenterFreqGet(self, prt = if_print):
+        """
+        Returns the center frequency of the oscillation control module.
+        Arguments:
+        - Modulator index (int) specifies which modulator or PLL to control. The valid values start from 1
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Center frequency (Hz) (float64)
+        - Error described in the Response message>Body section
+        """
+        body  = self.tcp.dtype_cvt(self.mod_index, 'int', 'bin')
+        header = self.tcp.header_construct('PLL.CenterFreqGet', len(body))
+        cmd = header + body
+        self.tcp.cmd_send(cmd)
+        
+        _, res_arg, res_err = self.tcp.res_recv('float64')
+        self.tcp.print_err(res_err)
+        df = pd.DataFrame({'Center frequency (Hz)': res_arg[0]},
+                                       index=[0]).T
+        if prt: 
+            print('\n'+
+              df.to_string(header=False)+
+              '\n\nCenter frequency returned.')
+        return df
+    
+    def PLLCenterFreqSet(self, center_freq, prt = if_print):
+        """
+        Sets the center frequency of the oscillation control module.
+        Arguments:
+        - Modulator index (int) specifies which modulator or PLL to control. The valid values start from 1
+        - Center frequency (Hz) (float64)
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        body  = self.tcp.dtype_cvt(self.mod_index, 'int', 'bin')
+        body  += self.tcp.dtype_cvt(center_freq, 'float64', 'bin')
+        header = self.tcp.header_construct('PLL.CenterFreqSet', len(body))
+        cmd = header + body
+        self.tcp.cmd_send(cmd)
+        
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+        return
+    
+    def PLLFreqShiftAutoCenter(self, prt = if_print):
+        """
+        Auto-centers frequency shift of the oscillation control module.
+        It works like the corresponding button on the oscillation control module. It adds the current frequency shift to the
+        center frequency and sets the frequency shift to zero.
+        Arguments:
+        - Modulator index (int) specifies which modulator or PLL to control. The valid values start from 1
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        body  = self.tcp.dtype_cvt(self.mod_index, 'int', 'bin')
+        header = self.tcp.header_construct('PLL.FreqShiftAutoCenter', len(body))
+        cmd = header + body
+        self.tcp.cmd_send(cmd)
+        
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+        return
+
 ######################################## Utilities Module #############################################
     def UtilSessionPathGet(self, prt = if_print):
         header = self.tcp.header_construct('Util.SessionPathGet', 0)

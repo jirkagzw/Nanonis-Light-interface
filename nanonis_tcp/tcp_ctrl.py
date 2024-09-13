@@ -239,6 +239,7 @@ class tcp_ctrl:
         res_arg = []
         res_err = pd.DataFrame()
         res_header = pd.DataFrame()
+      #  print(f"Response binary representation length: {len(res_bin_rep)}")
 
         # parse the header of a response message
         if get_header:

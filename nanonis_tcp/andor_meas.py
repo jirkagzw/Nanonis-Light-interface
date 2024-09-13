@@ -44,7 +44,7 @@ class andor_meas:
         
         body="{:.5f}".format(wl)
         header = 'SWL '
-        cmd = header + body + '\n'#self.tcp.termination_char
+        cmd = header + body + self.tcp.termination_char
 
         self.tcp.cmd_send(cmd)
         result= self.tcp.recv_until()
@@ -56,3 +56,147 @@ class andor_meas:
             print('\n' + result)
         return result 
     
+    def grating_set(self, number, prt=if_print):
+        """
+        Sets the grating on spectrograph to the specified value.. 
+
+        Parameters:
+            number (float): The grating number (1 to 4)
+            Gr n.1 150 grooves/mm. (500nm blaze) 500 nm range 2.5 nm resolution
+            Gr n.2 600 grooves/mm. (500nm blaze) 125 nm range 1 nm resolution
+            Gr n.3 600 grooves/mm. (1000nm blaze) 125 nm range 1 nm resolution
+            Gr n.4 1200 grooves/mm. (500nm blaze) 60 nm range 0.3 nm resolution
+
+            prt (bool): Whether to print the output (default is `if_print`).
+
+        Raises:
+            ValueError: If the wavelength is out of range 
+
+        Returns:
+            response from Andor
+        """
+        if number<1 and number>4:
+            raise ValueError('Only numbers from 1 to 4 are allowed')    
+        else:
+            
+            body="{:.0f}".format(number)
+            header = 'SGR '
+            cmd = header + body +self.tcp.termination_char
+    
+            self.tcp.cmd_send(cmd)
+            result= self.tcp.recv_until()
+        
+            if prt: 
+                print('\n' + result)
+            return result 
+    
+    def acqtime_set(self, acqtime, prt=if_print):
+        """
+        Sets the acquisition time of the camera to the specified value in seconds. 
+
+        Raises:
+            ValueError: If the time is out of range 
+
+        Returns:
+            response from Andor
+        """
+        if acqtime<=0 and acqtime>300:
+            body="{:.0f}".format(1)
+            raise ValueError('Only >0 and < 300 s are allowed')    
+
+        body="{:.4f}".format(acqtime)
+        header = 'SET '
+        cmd = header + body +self.tcp.termination_char
+
+        self.tcp.cmd_send(cmd)
+        result= self.tcp.recv_until()
+        
+        if prt: 
+            print('\n' + result)
+        return result 
+    
+    def acquisition_set(self, prt=if_print):
+        """
+        Starts the acquisition with the preselected parameters and returns the data as a DataFrame with two columns.
+    
+        Raises:
+            ValueError: If the response "OK AQD" is not received.
+        
+        Returns:
+            pandas.DataFrame: A DataFrame with columns:
+                'Wavelength (nm)' (float) and 'Counts' (int).
+        """
+        header = 'AQD '
+        body = ""
+        cmd = header + body + self.tcp.termination_char
+    
+        self.tcp.cmd_send(cmd)
+        result = self.tcp.recv_until()
+    
+        elements = result.split()
+        response = " ".join(elements[:2])
+        expected_string = "OK AQD"
+        
+        if response != expected_string:
+            raise ValueError(f"Error: Expected '{expected_string}', but got '{response}'.")
+    
+        ar_length = int(elements[2])
+        column_1 = elements[3:(3 + ar_length)]
+        column_2 = elements[3 + ar_length:]
+    
+        # Convert column_1 to floats and column_2 to integers
+        column_1 = [float(x) for x in column_1]
+        column_2 = [int(float(x)) for x in column_2]  # Convert to float first, then to int
+    
+        # Create a DataFrame with two columns
+        df = pd.DataFrame({
+            'Wavelength (nm)': column_1,
+            'Counts': column_2
+        })
+    
+        if prt:
+            print('\n' + response)
+        
+        return df
+
+    def settings_get(self, prt=if_print):
+        """
+        Gets the settings of the spectrograph.
+    
+        Raises:
+            ValueError: If the response "OK GST" is not received.
+        
+        Returns:
+            pandas.DataFrame: A DataFrame with columns:
+                '3 DIGIT code' (STRING) and 'Value' (float).
+        """
+        header = 'GST '
+        body = ""
+        cmd = header + body + self.tcp.termination_char
+    
+        self.tcp.cmd_send(cmd)
+        result = self.tcp.recv_until()
+    
+        elements = result.split()
+        response = " ".join(elements[:2])
+        expected_string = "OK GST"
+        
+        if response != expected_string:
+            raise ValueError(f"Error: Expected '{expected_string}', but got '{response}'.")
+    
+        column_1 = elements[1::2]
+        column_2 = elements[2::2]
+    
+        # Convert column_1 to floats and column_2 to integers
+        column_2 = [float(x) for x in column_2]  # Convert to float first, then to int
+    
+        # Create a DataFrame with two columns
+        df = pd.DataFrame({
+            'Code': column_1,
+            'Value': column_2
+        })
+    
+        if prt:
+            print('\n' + response)
+        
+        return df
