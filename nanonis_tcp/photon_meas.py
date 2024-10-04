@@ -727,7 +727,7 @@ class photon_meas:
         
         
     def spectrum_simple(self,acqtime=10, acqnum=1, name="LS-man"):
-        
+        name="AA"+name
         self.connect2.acqtime_set(acqtime)
         
         for i in range(0, int(acqnum)):
@@ -1092,7 +1092,7 @@ class photon_meas:
         counter,count_write=0,0
         
         # .3ds header creation
-        filename_3ds = self.connect.get_next_filename(name, extension='.3ds', folder=folder)
+        filename_3ds = self.connect.get_next_filename("M"+name, extension='.3ds', folder=folder)
     
         bias_voltage = self.connect.BiasGet().iloc[0, 0]  # Bias (V) as float
         grid_settings = np.array([cx,cy,1e-9*dim[0],1e-9*dim[1],angle])  # Grid settings as np.array
@@ -1118,7 +1118,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
             bw_fact=1
         else:
             col_lst=list(range(pix[0])) + list(range(pix[0]-1, -1, -1))
-            filename_3ds_bw = self.connect.get_next_filename(name+'_bw', extension='.3ds', folder=folder)
+            filename_3ds_bw = self.connect.get_next_filename("M"+name+'_bw', extension='.3ds', folder=folder)
             f_bw = open(filename_3ds_bw, 'wb')
             f_bw.write(header.encode())
             bw_fact=2
@@ -1206,7 +1206,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                     
                     if savedat==True:
                         # Define filenames and data
-                        filename = self.connect.get_next_filename(name, extension='.dat', folder=folder)
+                        filename = self.connect.get_next_filename("AA"+name, extension='.dat', folder=folder)
                         print(filename)
                         
 
@@ -1292,7 +1292,7 @@ Channels=Counts
                 f_bw.close()
             end_time_scan = time.perf_counter()
             elapsed_time_scan="{:.1f}".format(end_time_scan-start_time_scan)
-            filename_sxm = self.connect.get_next_filename(name,extension='.sxm',folder=folder)
+            filename_sxm = self.connect.get_next_filename("M"+name,extension='.sxm',folder=folder)
             
             nanonis_const= dict(zip(combined_df.T.iloc[0], combined_df.T.iloc[1].astype(str)))
             settings_dict=(dict(zip(settings.T.iloc[0], settings.T.iloc[1].astype(str))))
@@ -1347,6 +1347,7 @@ Channels=Counts
     
     def nanonis_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up"):
         # Initialize variables
+        name="AA"+name
         if direction in ["up", True, 0]:
             direction = "up"
         elif direction in ["down", False, 1]:
