@@ -13,7 +13,7 @@ import threading
 from datetime import datetime
 import sys
 import math
-
+from scipy.ndimage import median_filter
 class photon_meas:
     def __init__(self, connect,connect2): #connect2 = andor
         self.connect = connect
@@ -49,6 +49,58 @@ class photon_meas:
             # Seek to the start of the file and overwrite the placeholder
             f.seek(0)
             f.write(end_time_str)
+    
+    def cr_remove(self,spectra, filter_size=3, offset=300):
+        """
+        Identify and remove cosmic ray outliers from spectral data and average the acquisitions.
+    
+        Parameters:
+        - spectra: 2D NumPy array where each row is an acquisition (shape: [num_acquisitions, 1024])
+        - filter_size: Size of the horizontal median filter (default is 3)
+        - offset: Offset value to be subtracted from the spectra (default is 300)
+    
+        Returns:
+        - cleaned_average: 1D NumPy array of the averaged spectra after removing outliers
+        """
+        
+        # Ensure spectra is 2D: If it's 1D, reshape to (1, 1024)
+        if spectra.ndim == 1:
+            spectra = spectra.reshape(1, -1)  # Reshape to (1, 1024)
+            
+        # Apply a 2D median filter to the spectra data
+        filtered_spectra = median_filter(spectra, size=(spectra.shape[0], filter_size))
+    
+        # Calculate the threshold based on the error estimate
+        adjusted_spectra = filtered_spectra - offset
+        threshold = 5 * np.sqrt(adjusted_spectra)
+    
+        # Apply a median filter to the threshold to smooth it out
+        smoothed_threshold = median_filter(threshold, size=(spectra.shape[0], filter_size))
+    
+        # Identify outliers: points where the original spectra differ significantly from the filtered spectra
+        outliers = np.abs(spectra - filtered_spectra) > smoothed_threshold
+        
+        # Replace outliers with the median filtered values
+        cleaned_spectra = np.where(outliers, filtered_spectra, spectra)
+    
+        # Average the cleaned acquisitions
+        cleaned_average = np.mean(cleaned_spectra, axis=0)
+    
+        return cleaned_average
+    
+    # Example usage
+    num_acquisitions = 5
+    spectra = np.random.normal(loc=10, scale=1, size=(num_acquisitions, 1024)).astype(np.float32)
+    
+    # Introduce some cosmic ray outliers
+    spectra[1, 512] += 20  # Cosmic ray in the second acquisition
+    spectra[3, 300] += 25  # Cosmic ray in the fourth acquisition
+    
+    # Remove cosmic rays and average
+    average_spectrum = cr_remove(spectra)
+    
+    # Print the result
+    print(average_spectrum)
     
     def v(self, bias_mV,protection=True):
         """
@@ -752,6 +804,16 @@ class photon_meas:
         # Signal that acquisition is complete
         acquisition_complete.set()
         
+    def acquire_data_from_connect_relevant(self, signal_values, acquisition_complete, stop_time,relevant_indices):
+        start_time = time.time()
+        while not acquisition_complete.is_set() and (time.time() - start_time) < stop_time:
+            # Collect signal values from the connect device
+            signal_values.append(self.connect.SignalsValsGet(relevant_indices, 1))
+            # Sleep briefly to avoid busy-waiting
+           # time.sleep(0.1)
+        # Signal that acquisition is complete
+        acquisition_complete.set()
+        
     def acquire_data_from_connect_new(self, signal_values, acquisition_complete, stop_time,signal_range):
         start_time = time.time()
         while not acquisition_complete.is_set() and (time.time() - start_time) < stop_time:
@@ -862,6 +924,32 @@ class photon_meas:
      #   print(averages)
         return averages
     """
+    
+    def save_params_connect_relevant(self, list_of_dfs):
+        # Initialize a dictionary to store lists of values for each signal name
+        signal_values = {}
+    
+        for df_list in list_of_dfs:
+            for df in df_list:
+                # Skip DataFrames with fewer than 2 columns
+                if df.shape[1] < 2:
+                    continue
+    
+                # Assume first column is 'Signal names' and second column contains 'Values'
+                signal_names_col = df.iloc[:, 0]
+                values_col = df.iloc[:, 1]
+    
+                # Collect values for each signal name
+                for signal, value in zip(signal_names_col, values_col):
+                    # Initialize list if the signal name is encountered for the first time
+                    if signal not in signal_values:
+                        signal_values[signal] = []
+                    signal_values[signal].append(value)
+    
+        # Calculate the mean for each signal and store in the averages dictionary
+        averages = {signal: np.mean(values) if values else None for signal, values in signal_values.items()}
+    
+        return averages
 
     def save_params_connect_new(self,list_of_dfs, signal_names=None):
         signal_names_df=self.connect.SignalsNamesGet()
@@ -912,10 +1000,40 @@ class photon_meas:
     
     
     
+    def extract_relevant_indices(self,signal_names_df, signal_names_for_save=None):
+        """
+        Extracts indices of relevant signal names from signal_names_df.
     
+        Parameters:
+        signal_names_df : DataFrame
+            A DataFrame containing available signal names.
+        signal_names_for_save : list
+            A list of signal names to extract indices for.
+    
+        Returns:
+        list
+            A list of indices corresponding to relevant signal names.
+        """
+        if signal_names_for_save is None:
+            signal_names_for_save = [
+                "Bias (V)", "X (m)", "Y (m)", "Z (m)", "Current (A)", 
+                "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
+            ]
+        # Ensure that signal_names_df has the correct column
+        if 'Signal names' not in signal_names_df.columns:
+            raise ValueError("The DataFrame must contain a 'Signal names' column.")
+    
+        # Extract relevant indices for the signals to acquire
+        relevant_indices = [
+            signal_names_df[signal_names_df['Signal names'] == name].index[0]
+            for name in signal_names_for_save if name in signal_names_df['Signal names'].values
+        ]
+    
+        return relevant_indices
 
 
     def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
+        name="AA"+name
         # Initialize variables
         self.connect2.acqtime_set(acqtime)
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
@@ -957,9 +1075,9 @@ class photon_meas:
                 data_new = data_storage['data']
                 if i == 0:
                     data_dict['Wavelength (nm)'] = data_new['Wavelength (nm)']
-                    data_dict[f"Counts {i+1}"] = data_new['Counts']
+                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
                 else:
-                    data_dict[f"Counts {i+1}"] = data_new['Counts']
+                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
                     
               #   Optionally, set the stop signal here if you want to stop after each iteration
               #  stop_signal.set() # Uncomment if you want to stop after each response from connect2
@@ -968,6 +1086,14 @@ class photon_meas:
             print("Acquisition interrupted.")
         finally:
             # Ensure that `data` is created even if interrupted
+            counts_columns = np.array([data_dict[f"Counts nf {i + 1}"].to_numpy() for i in range(acqnum)])
+            data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
+            
+            # Reorder data_dict to place "Counts" after "Wavelength (nm)"
+            data_dict = {k: v for k, v in data_dict.items() if k == "Wavelength (nm)"} | \
+                        {"Counts": data_dict["Counts"]} | \
+                        {k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+            
             data = pd.DataFrame(data_dict)
           #  print("Sigvals before processing:", sigvals)
           #  print(signal_names_df)
@@ -1011,6 +1137,111 @@ class photon_meas:
                      
        # return data, sigvals, settings
     
+    def spectrum_relevant(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
+        name="AA"+name
+        # Initialize variables
+        self.connect2.acqtime_set(acqtime)
+        folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
+        settings=self.connect2.settings_get()
+        signal_names_df=self.connect.SignalsNamesGet()
+        relevant_indices=self.extract_relevant_indices(signal_names_df, signal_names_for_save=None)
+
+        sigvals = []
+        data_dict = {}
+        try:
+            for i in range(int(acqnum)):
+                # Create events to signal when acquisitions are complete
+                acquisition_complete_connect = threading.Event()
+                acquisition_complete_connect2 = threading.Event()
+                stop_signal = threading.Event()  # Create a stop signal
+                
+                # Storage for data from connect2
+                data_storage = {}
+                
+                # Start the thread to acquire data from connect2
+                acquire_thread2 = threading.Thread(target=self.acquire_data_from_connect2, args=(data_storage, acquisition_complete_connect2))
+                acquire_thread2.start()
+                
+                # Start a thread to acquire data from connect with a time limit
+                signal_values = []
+                acquire_thread_connect = threading.Thread(target=self.acquire_data_from_connect_relevant, args=(signal_values, acquisition_complete_connect, acqtime,relevant_indices)) 
+                acquire_thread_connect.start()
+                
+                # Wait for the acquisition to complete on connect2
+                acquisition_complete_connect2.wait()  # This will block until acquisition_complete_connect2 is set
+                
+                # Ensure the connect thread has finished
+                acquire_thread_connect.join()
+                acquire_thread2.join()
+                
+                # Process the acquired signal values
+                sigvals.append(signal_values)
+                
+                # Update the DataFrame with new data from connect2
+                data_new = data_storage['data']
+                if i == 0:
+                    data_dict['Wavelength (nm)'] = data_new['Wavelength (nm)']
+                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
+                else:
+                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
+                    
+              #   Optionally, set the stop signal here if you want to stop after each iteration
+              #  stop_signal.set() # Uncomment if you want to stop after each response from connect2
+        
+        except KeyboardInterrupt:
+            print("Acquisition interrupted.")
+        finally:
+            # Ensure that `data` is created even if interrupted
+            counts_columns = np.array([data_dict[f"Counts nf {i + 1}"].to_numpy() for i in range(acqnum)])
+            data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
+            
+            # Reorder data_dict to place "Counts" after "Wavelength (nm)"
+            data_dict = {k: v for k, v in data_dict.items() if k == "Wavelength (nm)"} | \
+                        {"Counts": data_dict["Counts"]} | \
+                        {k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+            
+            data = pd.DataFrame(data_dict)
+          #  print("Sigvals before processing:", sigvals)
+          #  print(signal_names_df)
+          
+            sigvals=self.save_params_connect_relevant(sigvals)
+            
+            formatted_date_str = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+
+            # Data to prepend
+            prepend_data = {
+                'Column1': ['Experiment', 'Date', 'User'],
+                'Column2': ['LS', formatted_date_str, user]
+            }
+            
+            # Create DataFrames
+            prepend_df = pd.DataFrame(prepend_data)
+            sigvals_df = pd.DataFrame(list(sigvals.items()), columns=['Column1', 'Column2'])
+       #     start_time = time.perf_counter()  # Use time.perf_counter() for high-resolution timing
+            # Define filenames and data
+            filename = self.connect.get_next_filename(name,extension='.dat',folder=folder)
+            print(filename)
+            combined_df = pd.concat([prepend_df, sigvals_df], ignore_index=True)
+            settings_df = settings
+            data_df = data
+            
+            # Format the DataFrame in one go
+            combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+            
+            # Write all data to a file in one go
+            with open(filename, 'w') as f:
+                # Write the formatted DataFrame
+                combined_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")
+                settings_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n") # Write additional settings
+                
+                # Write section header and additional data
+                f.write("\n[DATA]\n")
+                data_df.to_csv(f, sep='\t', header=True, index=False, lineterminator="\n")  
+              #  end_time = time.perf_counter()
+              #  elapsed_time = end_time - start_time
+               # print(f"Time taken for pix command: {elapsed_time:.4f} seconds")
+                     
+       # return data, sigvals, settings
 
     def spectrum_old(self, acqtime=10, acqnum=1, name="LS-man"):
         # Initialize variables
@@ -1178,15 +1409,26 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                         data_new = data_storage['data']
                         if i == 0:
                             data_dict['Wavelength (nm)'] = data_new['Wavelength (nm)']
-                            data_dict[f"Counts {i+1}"] = data_new['Counts']
+                            data_dict[f"Counts nf {i+1}"] = data_new['Counts']
                         else:
-                            data_dict[f"Counts {i+1}"] = data_new['Counts']
+                            data_dict[f"Counts nf {i+1}"] = data_new['Counts']
                         
                         # Optionally, set the stop signal here if you want to stop after each iteration
                         # stop_signal.set() # Uncomment if you want to stop after each response from connect2
                     
                     # SAVE FILES
+                    
+                    counts_columns = np.array([data_dict[f"Counts nf {i + 1}"].to_numpy() for i in range(acqnum)])
+                    data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
+                    
+                    # Reorder data_dict to place "Counts" after "Wavelength (nm)"
+                    data_dict = {k: v for k, v in data_dict.items() if k == "Wavelength (nm)"} | \
+                                {"Counts": data_dict["Counts"]} | \
+                                {k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+                    
+                    # Convert to DataFrame
                     data = pd.DataFrame(data_dict)
+
                     # print("Sigvals before processing:", sigvals)
                     # print(signal_names_df)
                     
@@ -1349,7 +1591,7 @@ Channels=Counts
     
     def nanonis_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up"):
         # Initialize variables
-        name="AA"+name
+
         if direction in ["up", True, 0]:
             direction = "up"
         elif direction in ["down", False, 1]:
