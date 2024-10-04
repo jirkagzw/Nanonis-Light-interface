@@ -917,6 +917,7 @@ class photon_meas:
 
     def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
         # Initialize variables
+        self.connect2.acqtime_set(acqtime)
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
         settings=self.connect2.settings_get()
         signal_names_df=self.connect.SignalsNamesGet()
@@ -1069,6 +1070,7 @@ class photon_meas:
         return data, sigvals2  
         
     def photon_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False):
+        self.connect2.acqtime_set(acqtime)
         # Initialize variables
         if direction in ["up", True, 0]:
             direction = "up"
