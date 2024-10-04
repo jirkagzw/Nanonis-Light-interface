@@ -1144,7 +1144,7 @@ class photon_meas:
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
         settings=self.connect2.settings_get()
         signal_names_df=self.connect.SignalsNamesGet()
-        relevant_indices=self.extract_relevant_indices(signal_names_df, signal_names_for_save=None)
+        relevant_indices=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
 
         sigvals = []
         data_dict = {}
