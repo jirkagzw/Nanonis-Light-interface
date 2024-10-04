@@ -72,7 +72,7 @@ class photon_meas:
     
         # Calculate the threshold based on the error estimate
         adjusted_spectra = filtered_spectra - offset
-        threshold = 5 * np.sqrt(adjusted_spectra)
+        threshold = 5 * np.sqrt(max(1,adjusted_spectra))
     
         # Apply a median filter to the threshold to smooth it out
         smoothed_threshold = median_filter(threshold, size=(spectra.shape[0], filter_size))
@@ -87,6 +87,20 @@ class photon_meas:
         cleaned_average = np.mean(cleaned_spectra, axis=0)
     
         return cleaned_average
+    
+    # Example usage
+    num_acquisitions = 5
+    spectra = np.random.normal(loc=10, scale=1, size=(num_acquisitions, 1024)).astype(np.float32)
+    
+    # Introduce some cosmic ray outliers
+    spectra[1, 512] += 20  # Cosmic ray in the second acquisition
+    spectra[3, 300] += 25  # Cosmic ray in the fourth acquisition
+    
+    # Remove cosmic rays and average
+    average_spectrum = cr_remove(spectra)
+    
+    # Print the result
+    print(average_spectrum)
     
     def v(self, bias_mV,protection=True):
         """
@@ -1076,9 +1090,11 @@ class photon_meas:
             data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
             
             # Reorder data_dict to place "Counts" after "Wavelength (nm)"
-            data_dict = {k: v for k, v in data_dict.items() if k == "Wavelength (nm)"} | \
-                        {"Counts": data_dict["Counts"]} | \
-                        {k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+            data_dict = {
+    **{k: v for k, v in data_dict.items() if k == "Wavelength (nm)"},
+        "Counts": data_dict["Counts"],
+        **{k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+    }
             
             data = pd.DataFrame(data_dict)
           #  print("Sigvals before processing:", sigvals)
@@ -1182,9 +1198,11 @@ class photon_meas:
             data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
             
             # Reorder data_dict to place "Counts" after "Wavelength (nm)"
-            data_dict = {k: v for k, v in data_dict.items() if k == "Wavelength (nm)"} | \
-                        {"Counts": data_dict["Counts"]} | \
-                        {k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+            data_dict = {
+**{k: v for k, v in data_dict.items() if k == "Wavelength (nm)"},
+    "Counts": data_dict["Counts"],
+    **{k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+}
             
             data = pd.DataFrame(data_dict)
           #  print("Sigvals before processing:", sigvals)
@@ -1408,9 +1426,11 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                     data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
                     
                     # Reorder data_dict to place "Counts" after "Wavelength (nm)"
-                    data_dict = {k: v for k, v in data_dict.items() if k == "Wavelength (nm)"} | \
-                                {"Counts": data_dict["Counts"]} | \
-                                {k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+                    data_dict = {
+        **{k: v for k, v in data_dict.items() if k == "Wavelength (nm)"},
+            "Counts": data_dict["Counts"],
+            **{k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+        }
                     
                     # Convert to DataFrame
                     data = pd.DataFrame(data_dict)
