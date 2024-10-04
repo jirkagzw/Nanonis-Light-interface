@@ -72,7 +72,7 @@ class photon_meas:
     
         # Calculate the threshold based on the error estimate
         adjusted_spectra = filtered_spectra - offset
-        threshold = 5 * np.sqrt(max(1,adjusted_spectra))
+        threshold = 5 * np.sqrt(np.maximum(1, np.abs(adjusted_spectra)))
     
         # Apply a median filter to the threshold to smooth it out
         smoothed_threshold = median_filter(threshold, size=(spectra.shape[0], filter_size))
