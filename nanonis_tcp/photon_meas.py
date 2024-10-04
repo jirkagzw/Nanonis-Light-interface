@@ -1094,7 +1094,7 @@ class photon_meas:
         counter,count_write=0,0
         
         # .3ds header creation
-        filename_3ds = self.connect.get_next_filename("M"+name, extension='.3ds', folder=folder)
+        filename_3ds = self.connect.get_next_filename("G"+name, extension='.3ds', folder=folder)
     
         bias_voltage = self.connect.BiasGet().iloc[0, 0]  # Bias (V) as float
         grid_settings = np.array([cx,cy,1e-9*dim[0],1e-9*dim[1],angle])  # Grid settings as np.array
@@ -1120,7 +1120,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
             bw_fact=1
         else:
             col_lst=list(range(pix[0])) + list(range(pix[0]-1, -1, -1))
-            filename_3ds_bw = self.connect.get_next_filename("M"+name+'_bw', extension='.3ds', folder=folder)
+            filename_3ds_bw = self.connect.get_next_filename("G"+name+'_bw', extension='.3ds', folder=folder)
             f_bw = open(filename_3ds_bw, 'wb')
             f_bw.write(header.encode())
             bw_fact=2
