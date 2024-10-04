@@ -719,6 +719,13 @@ class photon_meas:
         z_new=z+dz_nm*1E-9
         self.connect.ZCtrlZPosSet(z_new)
         
+    def df0(self):
+        df_old=self.connect.PLLCenterFreqGet().values[0][0]
+        self.connect.PLLFreqShiftAutoCenter()
+        df_new=self.connect.PLLCenterFreqGet().values[0][0]
+        return((df_new,df_new-df_old))
+        
+        
     def spectrum_simple(self,acqtime=10, acqnum=1, name="LS-man"):
         
         self.connect2.acqtime_set(acqtime)
@@ -908,7 +915,7 @@ class photon_meas:
     
 
 
-    def spectrum2(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
+    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
         # Initialize variables
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
         settings=self.connect2.settings_get()
@@ -986,7 +993,7 @@ class photon_meas:
             data_df = data
             
             # Format the DataFrame in one go
-            combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+            combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
@@ -1004,7 +1011,7 @@ class photon_meas:
        # return data, sigvals, settings
     
 
-    def spectrum(self, acqtime=10, acqnum=1, name="LS-man"):
+    def spectrum_old(self, acqtime=10, acqnum=1, name="LS-man"):
         # Initialize variables
         signal_names_df=self.connect.SignalsNamesGet()
         df_deep_copy = signal_names_df.copy(deep=True)
@@ -1205,7 +1212,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
 
                         
                         # Format the DataFrame in one go
-                        combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+                        combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
                         
                         # Write all data to a file in one go
                         with open(filename, 'w') as f_text:
