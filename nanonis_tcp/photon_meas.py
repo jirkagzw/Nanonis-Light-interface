@@ -88,20 +88,6 @@ class photon_meas:
     
         return cleaned_average
     
-    # Example usage
-    num_acquisitions = 5
-    spectra = np.random.normal(loc=10, scale=1, size=(num_acquisitions, 1024)).astype(np.float32)
-    
-    # Introduce some cosmic ray outliers
-    spectra[1, 512] += 20  # Cosmic ray in the second acquisition
-    spectra[3, 300] += 25  # Cosmic ray in the fourth acquisition
-    
-    # Remove cosmic rays and average
-    average_spectrum = cr_remove(spectra)
-    
-    # Print the result
-    print(average_spectrum)
-    
     def v(self, bias_mV,protection=True):
         """
         Set the bias voltage.
