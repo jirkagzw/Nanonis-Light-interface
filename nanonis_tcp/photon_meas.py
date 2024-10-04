@@ -63,7 +63,7 @@ class photon_meas:
         -----
         This function updates the bias voltage by sending a string formatted with the value and unit.
         """
-        lims=(-5,5)
+        lims=(-5000,5000)
         if protection:
             if bias_mV < lims[0] or bias_mV > lims[1]:
                 print(f"Value {bias_mV} not in range [{lims[0]}, {lims[1]}], coerced.")
