@@ -106,7 +106,6 @@ class photon_meas:
             if bias_mV < lims[0] or bias_mV > lims[1]:
                 print(f"Value {bias_mV} not in range [{lims[0]}, {lims[1]}], coerced.")
                 bias_mV = max(lims[0], min(bias_mV, lims[1]))
-        self.connect.ZCtrlSetpntSet(1e-9*bias_mV)
         self.connect.BiasSet(1e-3*bias_mV)
     
     
