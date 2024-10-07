@@ -3249,6 +3249,46 @@ class nanonis_ctrl:
               datalog_props_df.to_string(header=False)+
               '\n\nData Logger properties returned.')
         return datalog_props_df
+    
+######################################## User output module #############################################
+
+    def UserOutValSet(self, index, value, prt = if_print):
+        """
+    Sets the value of the selected user output channel.
+    Arguments:
+    - Output index (int) sets the output to be used, where index could be any value from 1 to the number of
+    available outputs
+    - Output value (float32) is the value applied to the selected user output in physical units
+    Return arguments (if Send response back flag is set to True when sending request message):
+    - Error described in the Response message>Body section
+        """
+        body  = self.tcp.dtype_cvt(index, 'int', 'bin')
+        body  += self.tcp.dtype_cvt(value, 'float32', 'bin')
+        header = self.tcp.header_construct('UserOut.ValSet', len(body))
+        cmd = header + body
+        self.tcp.cmd_send(cmd)
+        
+        
+    def UserOutCalibrSet(self, index, cal_per_volt, offset, prt = if_print):
+        """
+    Sets the calibration of the selected user output or monitor channel.
+    Arguments:
+    - Output index (int) sets the output to be used, where index could be any value from 1 to the number of
+    available outputs
+    - Calibration per volt (float32)
+    - Offset in physical units (float32)
+    Return arguments (if Send response back flag is set to True when sending request message):
+    - Error described in the Response message>Body section
+        """
+        body  = self.tcp.dtype_cvt(index, 'int', 'bin')
+        body  += self.tcp.dtype_cvt(cal_per_volt, 'float32', 'bin')
+        body  += self.tcp.dtype_cvt(offset, 'float32', 'bin')
+        header = self.tcp.header_construct('UserOut.CalibrSet', len(body))
+        cmd = header + body
+        self.tcp.cmd_send(cmd)       
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+        return
         
 ######################################## PLL Module #############################################   
     def PLLCenterFreqGet(self, prt = if_print):

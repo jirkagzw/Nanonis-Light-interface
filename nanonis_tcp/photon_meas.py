@@ -761,6 +761,9 @@ class photon_meas:
         self.connect.PLLFreqShiftAutoCenter()
         df_new=self.connect.PLLCenterFreqGet().values[0][0]
         return((df_new,df_new-df_old))
+    
+    def ao(self,index,value_mV):
+        self.connect.UserOutValSet(index,value_mV*1E-3)
         
         
     def spectrum_simple(self,acqtime=10, acqnum=1, name="LS-man"):
