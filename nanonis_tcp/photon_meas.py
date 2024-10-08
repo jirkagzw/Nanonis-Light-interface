@@ -1013,14 +1013,15 @@ class photon_meas:
     
         # Extract relevant indices for the signals to acquire
         relevant_indices = [
-            signal_names_df[signal_names_df['Signal names'] == name].index[0]
-            for name in signal_names_for_save if name in signal_names_df['Signal names'].values
+        int(signal_names_df[signal_names_df['Signal names'] == name].index[0])
+        for name in signal_names_for_save if name in signal_names_df['Signal names'].values
         ]
+
         matching_signals = [name for name in signal_names_for_save if name in signal_names_df['Signal names'].values]
         return relevant_indices, matching_signals
 
 
-    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
+    def spectrum_list(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None): # spectrum with saving lists
         name="AA"+name
         # Initialize variables
         self.connect2.acqtime_set(acqtime)
@@ -1127,114 +1128,6 @@ class photon_meas:
                      
        # return data, sigvals, settings
     
-    def spectrum_relevant(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
-        name="AA"+name
-        # Initialize variables
-        self.connect2.acqtime_set(acqtime)
-        folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
-        settings=self.connect2.settings_get()
-        signal_names_df=self.connect.SignalsNamesGet()
-        relevant_indices=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
-
-        sigvals = []
-        data_dict = {}
-        try:
-            for i in range(int(acqnum)):
-                # Create events to signal when acquisitions are complete
-                acquisition_complete_connect = threading.Event()
-                acquisition_complete_connect2 = threading.Event()
-                stop_signal = threading.Event()  # Create a stop signal
-                
-                # Storage for data from connect2
-                data_storage = {}
-                
-                # Start the thread to acquire data from connect2
-                acquire_thread2 = threading.Thread(target=self.acquire_data_from_connect2, args=(data_storage, acquisition_complete_connect2))
-                acquire_thread2.start()
-                
-                # Start a thread to acquire data from connect with a time limit
-                signal_values = []
-                acquire_thread_connect = threading.Thread(target=self.acquire_data_from_connect_relevant, args=(signal_values, acquisition_complete_connect, acqtime,relevant_indices)) 
-                acquire_thread_connect.start()
-                
-                # Wait for the acquisition to complete on connect2
-                acquisition_complete_connect2.wait()  # This will block until acquisition_complete_connect2 is set
-                
-                # Ensure the connect thread has finished
-                acquire_thread_connect.join()
-                acquire_thread2.join()
-                
-                # Process the acquired signal values
-                sigvals.append(signal_values)
-                
-                # Update the DataFrame with new data from connect2
-                data_new = data_storage['data']
-                if i == 0:
-                    data_dict['Wavelength (nm)'] = data_new['Wavelength (nm)']
-                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
-                else:
-                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
-                    
-              #   Optionally, set the stop signal here if you want to stop after each iteration
-              #  stop_signal.set() # Uncomment if you want to stop after each response from connect2
-        
-        except KeyboardInterrupt:
-            print("Acquisition interrupted.")
-        finally:
-            # Ensure that `data` is created even if interrupted
-            counts_columns = np.array([data_dict[f"Counts nf {i + 1}"].to_numpy() for i in range(acqnum)])
-            data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
-            
-            # Reorder data_dict to place "Counts" after "Wavelength (nm)"
-            data_dict = {
-**{k: v for k, v in data_dict.items() if k == "Wavelength (nm)"},
-    "Counts": data_dict["Counts"],
-    **{k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
-}
-            
-            data = pd.DataFrame(data_dict)
-          #  print("Sigvals before processing:", sigvals)
-          #  print(signal_names_df)
-          
-            sigvals=self.save_params_connect_relevant(sigvals)
-            
-            formatted_date_str = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
-
-            # Data to prepend
-            prepend_data = {
-                'Column1': ['Experiment', 'Date', 'User'],
-                'Column2': ['LS', formatted_date_str, user]
-            }
-            
-            # Create DataFrames
-            prepend_df = pd.DataFrame(prepend_data)
-            sigvals_df = pd.DataFrame(list(sigvals.items()), columns=['Column1', 'Column2'])
-       #     start_time = time.perf_counter()  # Use time.perf_counter() for high-resolution timing
-            # Define filenames and data
-            filename = self.connect.get_next_filename(name,extension='.dat',folder=folder)
-            print(filename)
-            combined_df = pd.concat([prepend_df, sigvals_df], ignore_index=True)
-            settings_df = settings
-            data_df = data
-            
-            # Format the DataFrame in one go
-            combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
-            
-            # Write all data to a file in one go
-            with open(filename, 'w') as f:
-                # Write the formatted DataFrame
-                combined_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")
-                settings_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n") # Write additional settings
-                
-                # Write section header and additional data
-                f.write("\n[DATA]\n")
-                data_df.to_csv(f, sep='\t', header=True, index=False, lineterminator="\n")  
-              #  end_time = time.perf_counter()
-              #  elapsed_time = end_time - start_time
-               # print(f"Time taken for pix command: {elapsed_time:.4f} seconds")
-                     
-       # return data, sigvals, settings
-
     def spectrum_old(self, acqtime=10, acqnum=1, name="LS-man"):
         # Initialize variables
         signal_names_df=self.connect.SignalsNamesGet()
@@ -1292,7 +1185,7 @@ class photon_meas:
                         
         return data, sigvals2  
 
-       def spectrum_relevant(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
+    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):# spectrum with only saving the relevant channels and using np array to store nanonis data
         name="AA"+name
         # Initialize variables
         self.connect2.acqtime_set(acqtime)
@@ -1302,7 +1195,7 @@ class photon_meas:
         relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
         
         nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
-        nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.int64)
+        nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.float64)
         #andor_array = np.full(andor_shape,np.nan, dtype=np.int64)
 
         data_dict = {}
@@ -1333,8 +1226,8 @@ class photon_meas:
                 acquire_thread2.join()
                 
                 # Process the acquired signal values
-                nanonis_array[i,:]=np.mean(np.stack([df.iloc[:, 1].values for df in signal_values]), axis=0)
-                del signal_values
+                nanonis_array[i,:]=np.nanmean(np.stack([df.iloc[:, 1].values for df in signal_values]), axis=0)
+                #del signal_values
                 # Update the DataFrame with new data from connect2
                 data_new = data_storage['data']
                 if i == 0:
@@ -1366,8 +1259,8 @@ class photon_meas:
 
             # Data to prepend
             prepend_data = {
-                'Column1': ['Experiment', 'Date', 'User'],
-                'Column2': ['LS', formatted_date_str, user]
+                'Signal names': ['Experiment', 'Date', 'User'],
+                'Value': ['LS', formatted_date_str, user]
             }
             
             # Create DataFrames
@@ -1403,7 +1296,7 @@ class photon_meas:
               #  elapsed_time = end_time - start_time
                # print(f"Time taken for pix command: {elapsed_time:.4f} seconds")
                      
-       # return data, sigvals, settings
+        return  sigvals_df,combined_df, prepend_df
 
     def photon_map_v2(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False):
         self.connect2.acqtime_set(acqtime)
@@ -1432,7 +1325,7 @@ class photon_meas:
         relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
         
         nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
-        nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.int64)
+        nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.float64)
         
         # .3ds header creation
         filename_3ds = self.connect.get_next_filename("G"+name, extension='.3ds', folder=folder)
@@ -1554,8 +1447,8 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                     
                     # Data to prepend
                     prepend_data = {
-                        'Column1': ['Experiment', 'Date', 'User'],
-                        'Column2': ['LS', formatted_date_str, user]
+                        'Signal names': ['Experiment', 'Date', 'User'],
+                        'Value': ['LS', formatted_date_str, user]
                     }
                     
                     # Create DataFrames
@@ -1709,7 +1602,7 @@ Channels=Counts
               #  elapsed_time = end_time - start_time
                # print(f"Time taken for pix command: {elapsed_time:.4f} seconds")
                           
-            return data_sxm,combined_data
+            #return data_sxm,combined_data
         
         
     def photon_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False):
