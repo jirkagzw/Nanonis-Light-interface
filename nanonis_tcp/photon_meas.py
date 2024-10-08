@@ -1016,8 +1016,8 @@ class photon_meas:
             signal_names_df[signal_names_df['Signal names'] == name].index[0]
             for name in signal_names_for_save if name in signal_names_df['Signal names'].values
         ]
-    
-        return relevant_indices
+        matching_signals = [name for name in signal_names_for_save if name in signal_names_df['Signal names'].values]
+        return relevant_indices, matching_signals
 
 
     def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
@@ -1291,6 +1291,426 @@ class photon_meas:
             sigvals2=self.save_params_connect_new(sigvals)
                         
         return data, sigvals2  
+
+       def spectrum_relevant(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):
+        name="AA"+name
+        # Initialize variables
+        self.connect2.acqtime_set(acqtime)
+        folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
+        settings=self.connect2.settings_get()
+        signal_names_df=self.connect.SignalsNamesGet()
+        relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
+        
+        nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
+        nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.int64)
+        #andor_array = np.full(andor_shape,np.nan, dtype=np.int64)
+
+        data_dict = {}
+        try:
+            for i in range(int(acqnum)):
+                # Create events to signal when acquisitions are complete
+                acquisition_complete_connect = threading.Event()
+                acquisition_complete_connect2 = threading.Event()
+                stop_signal = threading.Event()  # Create a stop signal
+                
+                # Storage for data from connect2
+                data_storage = {}
+                
+                # Start the thread to acquire data from connect2
+                acquire_thread2 = threading.Thread(target=self.acquire_data_from_connect2, args=(data_storage, acquisition_complete_connect2))
+                acquire_thread2.start()
+                
+                # Start a thread to acquire data from connect with a time limit
+                signal_values = []
+                acquire_thread_connect = threading.Thread(target=self.acquire_data_from_connect_relevant, args=(signal_values, acquisition_complete_connect, acqtime,relevant_indices)) 
+                acquire_thread_connect.start()
+                
+                # Wait for the acquisition to complete on connect2
+                acquisition_complete_connect2.wait()  # This will block until acquisition_complete_connect2 is set
+                
+                # Ensure the connect thread has finished
+                acquire_thread_connect.join()
+                acquire_thread2.join()
+                
+                # Process the acquired signal values
+                nanonis_array[i,:]=np.mean(np.stack([df.iloc[:, 1].values for df in signal_values]), axis=0)
+                del signal_values
+                # Update the DataFrame with new data from connect2
+                data_new = data_storage['data']
+                if i == 0:
+                    data_dict['Wavelength (nm)'] = data_new['Wavelength (nm)']
+                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
+                else:
+                    data_dict[f"Counts nf {i+1}"] = data_new['Counts']
+                    
+              #   Optionally, set the stop signal here if you want to stop after each iteration
+              #  stop_signal.set() # Uncomment if you want to stop after each response from connect2
+        
+        except KeyboardInterrupt:
+            print("Acquisition interrupted.")
+        finally:
+            # Ensure that `data` is created even if interrupted
+            counts_columns = np.array([data_dict[f"Counts nf {i + 1}"].to_numpy() for i in range(acqnum)])
+            data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
+            
+            # Reorder data_dict to place "Counts" after "Wavelength (nm)"
+            data_dict = {
+**{k: v for k, v in data_dict.items() if k == "Wavelength (nm)"},
+    "Counts": data_dict["Counts"],
+    **{k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+}
+            
+            data = pd.DataFrame(data_dict)
+                        
+            formatted_date_str = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+
+            # Data to prepend
+            prepend_data = {
+                'Column1': ['Experiment', 'Date', 'User'],
+                'Column2': ['LS', formatted_date_str, user]
+            }
+            
+            # Create DataFrames
+            prepend_df = pd.DataFrame(prepend_data)
+            
+            nanonis_mean_array = np.nanmean(nanonis_array, axis=0)
+            
+            sigvals_df = pd.DataFrame({
+                'Signal names': matching_signals,
+                'Value': nanonis_mean_array
+                })
+       #     start_time = time.perf_counter()  # Use time.perf_counter() for high-resolution timing
+            # Define filenames and data
+            filename = self.connect.get_next_filename(name,extension='.dat',folder=folder)
+            print(filename)
+            combined_df = pd.concat([prepend_df, sigvals_df], ignore_index=True)
+            settings_df = settings
+            data_df = data
+            
+            # Format the DataFrame in one go
+            combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+            
+            # Write all data to a file in one go
+            with open(filename, 'w') as f:
+                # Write the formatted DataFrame
+                combined_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")
+                settings_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n") # Write additional settings
+                
+                # Write section header and additional data
+                f.write("\n[DATA]\n")
+                data_df.to_csv(f, sep='\t', header=True, index=False, lineterminator="\n")  
+              #  end_time = time.perf_counter()
+              #  elapsed_time = end_time - start_time
+               # print(f"Time taken for pix command: {elapsed_time:.4f} seconds")
+                     
+       # return data, sigvals, settings
+
+    def photon_map_v2(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False):
+        self.connect2.acqtime_set(acqtime)
+        # Initialize variables
+        if direction in ["up", True, 0]:
+            direction = "up"
+        elif direction in ["down", False, 1]:
+            direction = "down"
+        else:
+            raise ValueError("Invalid direction. Use 'up', 'down', True, False, 0, or 1.")   
+        start_time_scan = time.perf_counter()
+        folder = self.connect.UtilSessionPathGet().loc['Session path', 0]
+        signal_names_df = self.connect.SignalsNamesGet()
+        SF = self.connect.ScanFrameGet()  # Retrieve scan frame
+        settings=self.connect2.settings_get()
+        if dim is None:
+            dim=(1e9*SF.values[2][0],1e9*SF.values[3][0])
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]  # Extract center and angle
+        wait_num = True  # Wait flag
+    
+        channels_of_interest = ['Z (m)', 'Current (A)', 'LI Demod 1 Y (A)', 'LI Demod 2 Y (A)', 'Counter 1 (Hz)']
+        data_ar=[]
+        sigval_ar=[]
+        counter,count_write=0,0
+        
+        relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
+        
+        nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
+        nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.int64)
+        
+        # .3ds header creation
+        filename_3ds = self.connect.get_next_filename("G"+name, extension='.3ds', folder=folder)
+    
+        bias_voltage = self.connect.BiasGet().iloc[0, 0]  # Bias (V) as float
+        grid_settings = np.array([cx,cy,1e-9*dim[0],1e-9*dim[1],angle])  # Grid settings as np.array
+        sweep_signal = "Wavelength (nm)"  # Sweep signal as string
+        count_write=0
+        
+        # Prepare the header
+        start_time = datetime.now().strftime('%d.%m.%Y %H:%M:%S.%f')[:-3]
+        header = f'''End time="{start_time}"
+Start time="{start_time}"
+Delay before measuring (s)=0
+Comment=
+Bias (V)={bias_voltage:.6E}
+Experiment=Experiment
+Date="{start_time.split()[0]}"
+User=
+Grid dim="{pix[0]} x {pix[1]}"
+Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
+
+'''
+        if backward==False:
+            col_lst=list(range(pix[0]))
+            bw_fact=1
+        else:
+            col_lst=list(range(pix[0])) + list(range(pix[0]-1, -1, -1))
+            filename_3ds_bw = self.connect.get_next_filename("G"+name+'_bw', extension='.3ds', folder=folder)
+            f_bw = open(filename_3ds_bw, 'wb')
+            f_bw.write(header.encode())
+            bw_fact=2
+        f = open(filename_3ds, 'wb')
+        f.write(header.encode())
+        try:
+            for row in range(pix[1]):
+                for index, column in enumerate(col_lst):
+                    counter+=1
+                    if direction == "up":
+                        dx_nm = (-(dim[0] / 2) + (dim[0] / pix[0]) * 0.5) + column * (dim[0] / pix[0])
+                        dy_nm = (-(dim[1] / 2) + (dim[1] / pix[1]) * 0.5) + row * (dim[1] / pix[1])
+                    elif direction == "down":
+                        dx_nm = (-(dim[0] / 2) + (dim[0] / pix[0]) * 0.5) + column * (dim[0] / pix[0])
+                        dy_nm = (-(dim[1] / 2) + (dim[1] / pix[1]) * 0.5) + (pix[1] - 1 - row) * (dim[1] / pix[1])
+                        
+                    dx_rot, dy_rot = self.rotate(dx_nm, dy_nm, angle)
+                    self.connect.FolMeXYPosSet(cx + dx_rot, cy + dy_rot, wait_num)  # Set new position
+                    
+                   # sigvals = []
+                    data_dict = {}
+                    
+                    for i in range(int(acqnum)):
+                        swrite=time.perf_counter() # start meas time
+                        # Create events to signal when acquisitions are complete
+                        acquisition_complete_connect = threading.Event()
+                        acquisition_complete_connect2 = threading.Event()
+                        stop_signal = threading.Event()  # Create a stop signal
+                        
+                        # Storage for data from connect2
+                        data_storage = {}
+                        
+                        # Start the thread to acquire data from connect2
+                        acquire_thread2 = threading.Thread(target=self.acquire_data_from_connect2, args=(data_storage, acquisition_complete_connect2))
+                        acquire_thread2.start()
+                        
+                        # Start a thread to acquire data from connect with a time limit
+                        signal_values = []
+                        acquire_thread_connect = threading.Thread(target=self.acquire_data_from_connect, args=(signal_values, acquisition_complete_connect, acqtime, len(signal_names_df)))
+                        acquire_thread_connect.start()
+                        
+                        # Wait for the acquisition to complete on connect2
+                        acquisition_complete_connect2.wait()  # This will block until acquisition_complete_connect2 is set
+                        
+                        # Ensure the connect thread has finished
+                        acquire_thread_connect.join()
+                        acquire_thread2.join()
+                        
+                        count_write+=time.perf_counter()-swrite # stop meas time
+                        
+                        # Process the acquired signal values
+             #           sigvals.append(signal_values)
+
+                        nanonis_array[i,:]=np.mean(np.stack([df.iloc[:, 1].values for df in signal_values]), axis=0)
+                        del signal_values
+                        
+                        # Update the DataFrame with new data from connect2
+                        data_new = data_storage['data']
+                        if i == 0:
+                            data_dict['Wavelength (nm)'] = data_new['Wavelength (nm)']
+                            data_dict[f"Counts nf {i+1}"] = data_new['Counts']
+                        else:
+                            data_dict[f"Counts nf {i+1}"] = data_new['Counts']
+                        
+                        # Optionally, set the stop signal here if you want to stop after each iteration
+                        # stop_signal.set() # Uncomment if you want to stop after each response from connect2
+                    
+                    # SAVE FILES
+                    
+                    counts_columns = np.array([data_dict[f"Counts nf {i + 1}"].to_numpy() for i in range(acqnum)])
+                    data_dict["Counts"] = self.cr_remove(counts_columns,filter_size=5,offset=305).tolist()
+                    
+                    # Reorder data_dict to place "Counts" after "Wavelength (nm)"
+                    data_dict = {
+        **{k: v for k, v in data_dict.items() if k == "Wavelength (nm)"},
+            "Counts": data_dict["Counts"],
+            **{k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]}
+        }
+                    
+                    # Convert to DataFrame
+                    data = pd.DataFrame(data_dict)
+                    del data_dict
+
+                    # print("Sigvals before processing:", sigvals)
+                    # print(signal_names_df)
+                    
+                #    sigvals = self.save_params_connect(sigvals, signal_names_df, signal_names=signal_names)
+                    
+                    formatted_date_str = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+                    
+                    # Data to prepend
+                    prepend_data = {
+                        'Column1': ['Experiment', 'Date', 'User'],
+                        'Column2': ['LS', formatted_date_str, user]
+                    }
+                    
+                    # Create DataFrames
+                    prepend_df = pd.DataFrame(prepend_data)
+                    
+                    nanonis_mean_array = np.nanmean(nanonis_array, axis=0)
+                    sigvals_df = pd.DataFrame({
+                        'Signal names': matching_signals,
+                        'Value': nanonis_mean_array
+                        })
+                    
+                 #   sigvals_df = pd.DataFrame(list(sigvals.items()), columns=['Column1', 'Column2'])
+                    
+                    combined_df = pd.concat([prepend_df, sigvals_df], ignore_index=True)
+                    settings_df = settings
+                    
+                    if savedat==True:
+                        # Define filenames and data
+                        filename = self.connect.get_next_filename("AA"+name, extension='.dat', folder=folder)
+                        print(filename)
+                        
+
+                        
+                        # Format the DataFrame in one go
+                        combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+                        
+                        # Write all data to a file in one go
+                        with open(filename, 'w') as f_text:
+                            # Write the formatted DataFrame
+                            combined_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")
+                            settings_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")  # Write additional settings
+                            
+                            # Write section header and additional data
+                            f_text.write("\n[DATA]\n")
+                            data.to_csv(f, sep='\t', header=True, index=False, lineterminator="\n")
+                    else:
+                        pass
+                    
+                    ### saves data 
+                    selected_columns = data.iloc[:, 1:].values
+                    
+                    # Step 2: Compute the row-wise average
+                    row_average=np.mean(selected_columns, axis=1)
+                    data_ar.append(row_average)
+                    
+                    # Filter the dataframe based on the channels of interest
+                   # filtered_sigvals_df = sigvals_df[sigvals_df['Column1'].isin(channels_of_interest)]
+                    sigval_ar.append(sigvals_df['Value'].tolist())
+                  #  filtered_sigvals_list=filtered_sigvals_df['Column2'].tolist()
+                    num_signals = len(sigvals_df)
+                    num_pixels=selected_columns.shape[0]
+                    
+                    # write to .3ds file
+# start problematic section
+                    if row==0 and index==0:
+                        fixed_parameters = ["Sweep Start", "Sweep End"]+sigvals_df['Signal names'].tolist()
+                            #print(fixed_parameters)
+                        header2=f'''Sweep Signal="{sweep_signal}"
+Fixed parameters="{';'.join(fixed_parameters)}"
+Experiment parameters=
+# Parameters (4 byte)={len(fixed_parameters)}
+Experiment size (bytes)=4096
+Points={num_pixels}
+Channels=Counts
+'''
+                        f.write(header2.encode())
+                        andor_chan_names= data.iloc[:, 0].values.tolist()
+                        chnames = [f"wl {i}=" + str(item) for i, item in enumerate(andor_chan_names)]
+                        f.write(('\n'.join(chnames)+"\n").encode())
+                        f.write((':HEADER_END:\n').encode())
+                    if backward==True and row==0 and index==pix[0]:
+                        f_bw.write(header2.encode())
+                        f_bw.write(('\n'.join(chnames)+"\n").encode())
+                        f_bw.write((':HEADER_END:\n').encode())
+                    res_list=[float(andor_chan_names[0]),float(andor_chan_names[-1])]+matching_signals
+                 #   print(res_list)
+                    swrite=time.perf_counter()
+                    # write only forward scan
+                    if index<pix[0]: 
+                        np.array(res_list).astype(">f4").tofile(f)
+                        row_average.astype(">f4").tofile(f)
+                    else:
+                        np.array(res_list).astype(">f4").tofile(f_bw)
+                        row_average.astype(">f4").tofile(f_bw)
+                    
+                    #timing and print in terminal remaining time
+                    elapsed = time.perf_counter() - start_time_scan
+                    remaining = (elapsed / counter) * (math.prod(pix)*bw_fact - counter)
+                    sys.stdout.write(f"\rExecuted {counter}/{math.prod(pix)*bw_fact} | Remaining: {int(remaining // 60):02d}:{int(remaining % 60):02d} | Overhead {count_write-acqtime}") #(column+1+pix[0]*row)*
+                    sys.stdout.flush()
+                   # print(f"Executed {counter}/{math.prod(pix)}", end="\r")  # Updates in-place
+                 
+            
+        except KeyboardInterrupt:
+            print("Acquisition interrupted.")
+            for i in range(len(sigval_ar),int(len(col_lst)*pix[1])):
+                sigval_ar.append([np.NaN] * num_signals)
+                data_ar.append(np.full(num_pixels, np.NaN))
+        finally:
+            f.close()
+            if backward==True:
+                f_bw.close()
+            end_time_scan = time.perf_counter()
+            elapsed_time_scan="{:.1f}".format(end_time_scan-start_time_scan)
+            filename_sxm = self.connect.get_next_filename("M"+name,extension='.sxm',folder=folder)
+            
+            nanonis_const= dict(zip(combined_df.T.iloc[0], combined_df.T.iloc[1].astype(str)))
+            settings_dict=(dict(zip(settings.T.iloc[0], settings.T.iloc[1].astype(str))))
+            scan_par = {
+                "REC_DATE": datetime.now().strftime('%d.%m.%Y'),
+                "REC_TIME":  datetime.now().strftime('%H:%M:%S'),
+                "ACQ_TIME": str(elapsed_time_scan),
+                "SCAN_PIXELS": f"{pix[0]}\t{pix[1]}",
+                "SCAN_FILE": filename_sxm,
+                "SCAN_RANGE": f"{1e-9 * dim[0]:.6E}\t{1e-9 * dim[1]:.6E}",
+                "SCAN_OFFSET": f"{cx:.6E}\t{cy:.6E}",
+                "SCAN_ANGLE": str(angle),
+                "SCAN_DIR": direction,
+                "BIAS": str(sigvals_df[sigvals_df['Column1'].isin(["Bias (V)"])]['Column2'].iloc[0])
+                }   
+            andor_chan_names= data.iloc[:, 0].values.tolist()
+            nanonis_chan_names=sigvals_df['Signal names'].tolist()
+            
+            nanononis_data_to_sxm=np.array(sigval_ar).T
+            andor_data_to_sxm=np.array(data_ar).T
+            combined_data = np.vstack((nanononis_data_to_sxm, andor_data_to_sxm))
+            
+                        # Define constants
+            scan_dir = 'both'
+            default_value1 = '1.000E+0'
+            default_value2 = '0.000E+0'
+            
+            # Initialize lists to store the final output
+            final_list = []
+            
+            # Process nanonis_chan_names
+            for i, name in enumerate(nanonis_chan_names, start=1):
+                base_name, unit = name.split(' (')
+                unit = unit.strip(')')
+                final_list.append([i, f'{base_name}_avg.', unit, scan_dir, default_value1, default_value2])
+            
+            # Process andor_chan_names starting from index 128
+            for i, name in enumerate(andor_chan_names, start=128):
+                final_list.append([i, name, 'nm', scan_dir, default_value1, default_value2])
+
+            data_sxm=self.connect.writesxm(backward,filename_sxm, settings_dict, scan_par, final_list, combined_data)
+
+            # Ensure that `data` is created even if interrupted
+     
+              #  end_time = time.perf_counter()
+              #  elapsed_time = end_time - start_time
+               # print(f"Time taken for pix command: {elapsed_time:.4f} seconds")
+                          
+            return data_sxm,combined_data
+        
         
     def photon_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False):
         self.connect2.acqtime_set(acqtime)
