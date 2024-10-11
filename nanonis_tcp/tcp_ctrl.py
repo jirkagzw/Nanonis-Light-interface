@@ -355,9 +355,22 @@ class tcp_ctrl:
         elif status == 'True/On':
             return 1
         else:
-            print("Error: A valid input should be either in [0, 1] or in ['False/Off', ''True/On].")
-            return status      
-
+            print(str(status)+" sent, Error: A valid input should be either in [0, 1] or in ['False/Off', ''True/On].")
+            return status     
+        
+        
+    def tri_bi_cvt(self,status):
+        if status == 0:
+            return 'Off/No'
+        elif status == 1:
+            return 'Yes/On'
+        elif status == 'False/Off':
+            return 2
+        elif status == 'True/On':
+            return 1
+        else:
+            print("Error: A valid input should be either in [0, 1] or in ['False/Off', 'True/On']")
+            return status
         
     def rgb_to_int(self, rgb_lst):
         # Make sure the color components are within the valid range (0-255)

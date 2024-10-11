@@ -437,7 +437,7 @@ class nanonis_ctrl:
         Returns:
             pd.DataFrame: A DataFrame with the number of channels and their indexes.
         """
-        print('To get the signal name and its corresponding index in the list of the 128 available signals in the Nanonis Controller, use the "Signal.NamesGet" function, or check the RT Idx value in the Signals Manager module.')
+        #print('To get the signal name and its corresponding index in the list of the 128 available signals in the Nanonis Controller, use the "Signal.NamesGet" function, or check the RT Idx value in the Signals Manager module.')
 
         body  = self.tcp.dtype_cvt(num_chs, 'int', 'bin')
         body += self.tcp.dtype_cvt(ch_idx, '1dint', 'bin')
@@ -534,36 +534,75 @@ class nanonis_ctrl:
 
     def BiasSpectrPropsGet(self, prt = if_print):
         """
-        Get the properties of Bias Spectroscopy.
-
-        Parameters:
-            prt (bool, optional): Whether to print the properties. Default is `if_print`.
-
-        Returns:
-            pd.DataFrame: A DataFrame with the current properties of Bias Spectroscopy.
-        """
+            BiasSpectr.PropsGet
+            Returns the Bias Spectroscopy parameters.
+        
+            This function retrieves various parameters related to the Bias Spectroscopy module, such as the number of sweeps, channels, and whether to save individual sweeps.
+        
+            Arguments: None
+        
+            Return arguments (if Send response back flag is set to True when sending request message):
+            - Save all (unsigned int16): Indicates whether the data from individual sweeps are saved along with the average data (1 = Save, 0 = Don't Save). This parameter is relevant only when multiple sweeps are configured.
+            - Number of sweeps (int): The number of sweeps to measure and average.
+            - Backward sweep (unsigned int16): Indicates whether the backward sweep is performed (1 = Yes, 0 = No). Forward is always measured.
+            - Number of points (int): The number of points to acquire over the sweep range.
+            - Channels size (int): The size in bytes of the Channels string array.
+            - Number of channels (int): The number of channels in the Channels string array.
+            - Channels (1D array string): Names of the acquired channels in the sweep. The size of each string is defined by an integer 32 that precedes it.
+            - Parameters size (int): The size in bytes of the Parameters string array.
+            - Number of parameters (int): The number of elements in the Parameters string array.
+            - Parameters (1D array string): Parameters of the sweep. The size of each string is defined by an integer 32 that precedes it.
+            - Fixed parameters size (int): The size in bytes of the Fixed parameters string array.
+            - Number of fixed parameters (int): The number of elements in the Fixed parameters string array.
+            - Fixed parameters (1D array string): Fixed parameters of the sweep. The size of each string is defined by an integer 32 that precedes it.
+            - Error: Described in the Response message>Body section.
+        
+            The function constructs a DataFrame with the retrieved properties and returns it. The DataFrame contains:
+            - 'Save all': The save-all flag converted to a readable format.
+            - 'Number of sweeps': Number of configured sweeps.
+            - 'Backward sweep': Backward sweep flag converted to a readable format.
+            - 'Number of points': Total number of points across the sweep range.
+            - 'Number of channels': The number of channels involved in the sweep.
+            - 'Channels': A list of the names of the channels.
+            - 'Number of parameters': Total number of parameters involved in the sweep.
+            - 'Parameters': A list of the parameters.
+            - 'Number of fixed parameters': Total number of fixed parameters.
+            - 'Fixed parameters': A list of the fixed parameters.
+        
+            If `prt` is set to True, the DataFrame is printed in a formatted manner.
+        
+            Parameters:
+            - prt (bool): If True, prints the properties DataFrame (default is the value of if_print).
+        
+            Returns:
+            - props_df (DataFrame): DataFrame containing the Bias Spectroscopy properties.
+            """
         header = self.tcp.header_construct('BiasSpectr.PropsGet', body_size = 0)
-
+    
         self.tcp.cmd_send(header)
-        _, res_arg, res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 'uint16', 'uint16')
-
+        _, res_arg, res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 'int', 'int', '1dstr', 'int', 'int', '1dstr')
+    
         self.tcp.print_err(res_err)
-        props_df = pd.DataFrame({'Save all': self.tcp.tristate_cvt(res_arg[0]), 
+        props_df = pd.DataFrame({'Save all': self.tcp.bistate_cvt(res_arg[0]), 
                                  'Number of sweeps': res_arg[1], 
-                                 'Backward sweep': self.tcp.tristate_cvt(res_arg[2]), 
+                                 'Backward sweep': self.tcp.bistate_cvt(res_arg[2]), 
                                  'Number of points': res_arg[3], 
-                                 'Z offset (m)': self.tcp.unit_cvt(res_arg[4]),
-                                 'Autosave': self.tcp.tristate_cvt(res_arg[5]), 
-                                 'Show save dialog': self.tcp.tristate_cvt(res_arg[6])},
+                                 'Number of channels': res_arg[5],
+                                 'Channels': res_arg[6].tolist(), 
+                                 'Number of parameters': res_arg[8],
+                                 'Parameters': res_arg[9].tolist(),
+                                 'Number of fixed parameters': res_arg[11],
+                                 'Fixed parameters': res_arg[12].tolist()
+                                 },
                                  index=[0]).T
-
         if prt: 
             print('\n'+
-                props_df.to_string(header=False)+
+                props_df.to_string(header=False) + 
                 '\n\nBias spectroscopy properties returned.')
         return props_df
+    
 
-    def BiasSpectrAdvPropsSet(self, reset_bias, lockin_run, prt = if_print):
+    def BiasSpectrAdvPropsSet(self, reset_bias, z_ctrl_hold, rec_final_z, lock_in_run, prt = if_print):
         """
         Set advanced properties for Bias Spectroscopy.
 
@@ -573,7 +612,9 @@ class nanonis_ctrl:
             prt (bool, optional): Whether to print the result. Default is `if_print`.
         """
         body  = self.tcp.dtype_cvt(reset_bias, 'uint16', 'bin')
-        body += self.tcp.dtype_cvt(lockin_run, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(z_ctrl_hold, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(rec_final_z, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(lock_in_run, 'uint16', 'bin')
         header = self.tcp.header_construct('BiasSpectr.AdvPropsSet', body_size = len(body))
         cmd = header + body
 
@@ -581,8 +622,18 @@ class nanonis_ctrl:
         _, _, res_err = self.tcp.res_recv()
 
         self.tcp.print_err(res_err)
+        props_df = pd.DataFrame({'Reset bias': self.tcp.tristate_cvt(reset_bias), 
+                                 'Z-Controller hold': self.tcp.tristate_cvt(z_ctrl_hold), 
+                                 'Record final Z': self.tcp.tristate_cvt(rec_final_z), 
+                                 'Lockin Run': self.tcp.tristate_cvt(lock_in_run), 
+                                 },
+                                 index=[0]).T
         if prt: 
-            print('Advanced properties set.')
+            print('\n'+
+                props_df.to_string(header=False)+
+                '\n\nBias spectroscopy advanced properties set.')
+        return props_df
+    
 
     def BiasSpectrAdvPropsGet(self, prt = if_print):
         """
@@ -597,36 +648,39 @@ class nanonis_ctrl:
         header = self.tcp.header_construct('BiasSpectr.AdvPropsGet', body_size = 0)
 
         self.tcp.cmd_send(header)
-        _, res_arg, res_err = self.tcp.res_recv('uint16', 'uint16')
+        _, res_arg, res_err = self.tcp.res_recv('uint16', 'uint16', 'uint16', 'uint16')
 
         self.tcp.print_err(res_err)
-        adv_props_df = pd.DataFrame({'Reset bias': self.tcp.tristate_cvt(res_arg[0]),
-                                     'Lock-in run': self.tcp.tristate_cvt(res_arg[1])},
-                                    index=[0]).T
-
+        props_df = pd.DataFrame({'Reset bias': self.tcp.bistate_cvt(res_arg[0]), 
+                                 'Z-Controller hold': self.tcp.bistate_cvt(res_arg[1]), 
+                                 'Record final Z': self.tcp.bistate_cvt(res_arg[2]), 
+                                 'Lockin Run': self.tcp.bistate_cvt(res_arg[3]), 
+                                 },
+                                 index=[0]).T
         if prt: 
             print('\n'+
-                adv_props_df.to_string(header=False)+
-                '\n\nAdvanced properties returned.')
-        return adv_props_df
+                props_df.to_string(header=False)+
+                '\n\nBias spectroscopy advanced properties returned.')
+        return props_df
+    
 
-    def BiasSpectrLimitsSet(self, lower_limit, upper_limit, prt = if_print):
+    def BiasSpectrLimitsSet(self, start_val, end_val, prt = if_print):
         """
         Set the bias limits for Bias Spectroscopy.
 
         Parameters:
-            lower_limit (float): The lower bias limit.
-            upper_limit (float): The upper bias limit.
+            start_val (float): The lower bias limit.
+            end_val(float): The upper bias limit.
             prt (bool, optional): Whether to print the result. Default is `if_print`.
 
         Returns:
             pd.DataFrame: A DataFrame with the bias limits set.
         """
-        lower_limit = self.tcp.unit_cvt(lower_limit)
-        upper_limit = self.tcp.unit_cvt(upper_limit)
+        start_val = self.tcp.unit_cvt(start_val)
+        end_val = self.tcp.unit_cvt(end_val)
 
-        body  = self.tcp.dtype_cvt(lower_limit, 'float32', 'bin')
-        body += self.tcp.dtype_cvt(upper_limit, 'float32', 'bin')
+        body  = self.tcp.dtype_cvt(start_val, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(end_val, 'float32', 'bin')
         header = self.tcp.header_construct('BiasSpectr.LimitsSet', body_size = len(body))
         cmd = header + body
 
@@ -634,15 +688,16 @@ class nanonis_ctrl:
         _, _, res_err = self.tcp.res_recv()
 
         self.tcp.print_err(res_err)
-        limits_df = pd.DataFrame({'Lower limit (V)': lower_limit, 
-                                  'Upper limit (V)': upper_limit},
+        limits_df = pd.DataFrame({'Start value (V)': start_val, 
+                                 'Stop value (V)': end_val, 
+                                 },
                                  index=[0]).T
-
         if prt: 
             print('\n'+
                 limits_df.to_string(header=False)+
                 '\n\nBias limits set.')
         return limits_df
+
 
     def BiasSpectrLimitsGet(self, prt = if_print):
         """
@@ -660,53 +715,72 @@ class nanonis_ctrl:
         _, res_arg, res_err = self.tcp.res_recv('float32', 'float32')
 
         self.tcp.print_err(res_err)
-        limits_df = pd.DataFrame({'Lower limit (V)': self.tcp.unit_cvt(res_arg[0]),
-                                  'Upper limit (V)': self.tcp.unit_cvt(res_arg[1])},
+        limits_df = pd.DataFrame({'Start value (V)': res_arg[0], 
+                                 'Stop value (V)': res_arg[1]},
                                  index=[0]).T
-
         if prt: 
             print('\n'+
                 limits_df.to_string(header=False)+
-                '\n\nBias limits returned.')
+                '\n\nBias spectroscopy bias limits returned.')
         return limits_df
-
-    def BiasSpectrTimingSet(self, t_ramp, t_sweep, t_wait, prt = if_print):
+    
+    def BiasSpectrTimingSet(self, z_avg_t, z_offset, init_settling_t, max_slew_rate, settling_t, inte_t, end_settling_t, z_ctrl_t, prt = if_print):
         """
         Set the timing parameters for Bias Spectroscopy.
-
+    
         Parameters:
-            t_ramp (float): Ramp time in seconds.
-            t_sweep (float): Sweep time in seconds.
-            t_wait (float): Wait time in seconds.
-            prt (bool, optional): Whether to print the result. Default is `if_print`.
-
+            z_avg_t (float): Z averaging time in seconds.
+            z_offset (float): Z offset in meters.
+            init_settling_t (float): Initial settling time in seconds.
+            max_slew_rate (float): Maximum slew rate in volts per second (V/s).
+            settling_t (float): Settling time in seconds.
+            inte_t (float): Integration time in seconds.
+            end_settling_t (float): End settling time in seconds.
+            z_ctrl_t (float): Z control time in seconds.
+            prt (bool, optional): Whether to print the result. Defaults to `if_print`.
+    
         Returns:
-            pd.DataFrame: A DataFrame with the timing parameters set.
+            pd.DataFrame: A DataFrame containing the timing parameters that were set.
         """
-        t_ramp = self.tcp.unit_cvt(t_ramp)
-        t_sweep = self.tcp.unit_cvt(t_sweep)
-        t_wait = self.tcp.unit_cvt(t_wait)
-
-        body  = self.tcp.dtype_cvt(t_ramp, 'float32', 'bin')
-        body += self.tcp.dtype_cvt(t_sweep, 'float32', 'bin')
-        body += self.tcp.dtype_cvt(t_wait, 'float32', 'bin')
-        header = self.tcp.header_construct('BiasSpectr.TimingSet', body_size = len(body))
+        z_avg_t = self.tcp.unit_cvt(z_avg_t)
+        z_offset = self.tcp.unit_cvt(z_offset)
+        init_settling_t = self.tcp.unit_cvt(init_settling_t)
+        max_slew_rate = self.tcp.unit_cvt(max_slew_rate)
+        settling_t = self.tcp.unit_cvt(settling_t)
+        inte_t = self.tcp.unit_cvt(inte_t)
+        end_settling_t = self.tcp.unit_cvt(end_settling_t)
+        z_ctrl_t = self.tcp.unit_cvt(z_ctrl_t)
+    
+        body  = self.tcp.dtype_cvt(z_avg_t, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(z_offset, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(init_settling_t, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(max_slew_rate, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(settling_t, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(inte_t, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(end_settling_t, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(z_ctrl_t, 'float32', 'bin')
+        header = self.tcp.header_construct('BiasSpectr.TimingSet', len(body))
         cmd = header + body
-
+    
         self.tcp.cmd_send(cmd)
         _, _, res_err = self.tcp.res_recv()
-
+    
         self.tcp.print_err(res_err)
-        timing_df = pd.DataFrame({'Ramp time (s)': t_ramp, 
-                                  'Sweep time (s)': t_sweep, 
-                                  'Wait time (s)': t_wait},
+        timing_df = pd.DataFrame({'Z averaging time (s)': z_avg_t,
+                                   'Z offset (m)': z_offset,
+                                   'Initial settling time (s)': init_settling_t,
+                                   'Maximum slew rate (V/s)': max_slew_rate,
+                                   'Settling time (s)': settling_t,
+                                   'Integration time (s)': inte_t,
+                                   'End settling time (s)': end_settling_t,
+                                   'Z control time (s)': z_ctrl_t},
                                  index=[0]).T
-
         if prt: 
             print('\n'+
                 timing_df.to_string(header=False)+
-                '\n\nTiming parameters set.')
+                '\n\nBias spectroscopy timing set.')
         return timing_df
+
 
     def BiasSpectrTimingGet(self, prt = if_print):
         """
@@ -718,24 +792,29 @@ class nanonis_ctrl:
         Returns:
             pd.DataFrame: A DataFrame with the current timing parameters.
         """
-        header = self.tcp.header_construct('BiasSpectr.TimingGet', body_size = 0)
+        header = self.tcp.header_construct('BiasSpectr.TimingGet', 0)
 
         self.tcp.cmd_send(header)
-        _, res_arg, res_err = self.tcp.res_recv('float32', 'float32', 'float32')
+        _, res_arg, res_err = self.tcp.res_recv('float32','float32','float32','float32','float32','float32','float32','float32')
 
         self.tcp.print_err(res_err)
-        timing_df = pd.DataFrame({'Ramp time (s)': self.tcp.unit_cvt(res_arg[0]), 
-                                  'Sweep time (s)': self.tcp.unit_cvt(res_arg[1]), 
-                                  'Wait time (s)': self.tcp.unit_cvt(res_arg[2])},
+        timing_df = pd.DataFrame({'Z averaging time (s)': res_arg[0],
+                                  'Z offset (m)': res_arg[1],
+                                  'Initial settling time (s)': res_arg[2],
+                                  'Maximum slew rate (V/s)': res_arg[3],
+                                  'Settling time (s)': res_arg[4],
+                                  'Integration time (s)': res_arg[5],
+                                  'End settling time (s)': res_arg[6],
+                                  'Z control time (s)': res_arg[7]},
                                  index=[0]).T
-
         if prt: 
             print('\n'+
                 timing_df.to_string(header=False)+
-                '\n\nTiming parameters returned.')
+                '\n\nBias spectroscopy timing settings retured.')
         return timing_df
-
-    def BiasSpectrTTLSyncSet(self, ttl_sync, prt = if_print):
+        
+    
+    def BiasSpectrTTLSyncSet(self, enable, ttl_line, ttl_polarity, t_2_on, on_duration, prt = if_print):
         """
         Set the TTL synchronization parameters for Bias Spectroscopy.
 
@@ -746,36 +825,353 @@ class nanonis_ctrl:
         Returns:
             pd.DataFrame: A DataFrame with the TTL synchronization settings.
         """
-        body  = self.tcp.dtype_cvt(ttl_sync, 'uint16', 'bin')
-        header = self.tcp.header_construct('BiasSpectr.TTLSyncSet', body_size = len(body))
+        t_2_on = self.tcp.unit_cvt(t_2_on)
+        on_duration = self.tcp.unit_cvt(on_duration)
+
+        body  = self.tcp.dtype_cvt(enable, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(ttl_line, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(ttl_polarity, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(t_2_on, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(on_duration, 'float32', 'bin')
+        header = self.tcp.header_construct('BiasSpectr.TTLSyncSet', len(body))
         cmd = header + body
 
         self.tcp.cmd_send(cmd)
         _, _, res_err = self.tcp.res_recv()
 
         self.tcp.print_err(res_err)
-        ttl_sync_df = pd.DataFrame({'TTL Synchronization': self.tcp.tristate_cvt(ttl_sync)},
-                                    index=[0]).T
-
+        ttl_df = pd.DataFrame({'Enable': self.tcp.tristate_cvt(enable),
+                               'TTL line': ttl_line,
+                               'TTL polarity': ttl_polarity,
+                               'Time to on (s)': t_2_on,
+                               'On duration (s)': on_duration},
+                                index=[0]).T
         if prt: 
             print('\n'+
-                ttl_sync_df.to_string(header=False)+
-                '\n\nTTL Synchronization set.')
-        return ttl_sync_df
+                ttl_df.to_string(header=False)+
+                '\n\nTTL sychronizetion set.')
+        return ttl_df
 
     def BiasSpectrTTLSyncGet(self, prt = if_print):
         """
         Get the current TTL synchronization parameters for Bias Spectroscopy.
-
+        
         Parameters:
             prt (bool, optional): Whether to print the TTL synchronization settings. Default is `if_print`.
-
+    
         Returns:
             pd.DataFrame: A DataFrame with the current TTL synchronization settings.
         """
         header = self.tcp.header_construct('BiasSpectr.TTLSyncGet', body_size = 0)
-
+    
         self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('uint16', 'uint16', 'uint16', 'float32', 'float32')
+    
+        self.tcp.print_err(res_err)
+        ttl_df = pd.DataFrame({'Enable': res_arg[0],
+                               'TTL line': res_arg[1],
+                               'TTL polarity': res_arg[2],
+                               'Time to on (s)': res_arg[3],
+                               'On duration (s)': res_arg[4]},
+                                index=[0]).T
+        if prt: 
+            print('\n'+
+                ttl_df.to_string(header=False)+
+                '\n\nTTL sychronizetion settings returned.')
+        return ttl_df
+        
+    def BiasSpectrAltZCtrlSet(self, alt_z_ctrl_sp, sp, settling_t, prt = if_print):
+        """
+        BiasSpectr.AltZCtrlSet
+        Sets the configuration of the alternate Z-controller setpoint in the Advanced section of the Bias Spectroscopy module.
+        
+        When switched on, the Z-controller setpoint is set to the setpoint right after starting the measurement. 
+        After changing the setpoint, the settling time (in seconds) will be waited for the Z-controller to adjust to the modified setpoint.
+        Then, Z averaging will start. The original Z-controller setpoint is restored at the end of the measurement, before restoring the Z-controller state.
+    
+        Arguments:
+        - Alternate Z-controller setpoint (unsigned int16): 0 means no change, 1 means On, and 2 means Off
+        - Setpoint (float32): The new setpoint for the Z-controller
+        - Settling time (float32): Time (in seconds) to wait for the Z-controller to stabilize
+    
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        sp = self.tcp.unit_cvt(sp)
+        settling_t = self.tcp.unit_cvt(settling_t)
+    
+        body  = self.tcp.dtype_cvt(alt_z_ctrl_sp, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(sp, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(settling_t, 'float32', 'bin')
+        header = self.tcp.header_construct('BiasSpectr.AltZCtrlSet', len(body))
+        cmd = header + body
+    
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+    
+        self.tcp.print_err(res_err)
+        alt_z_ctrl_df = pd.DataFrame({'Alternative Z-controller setpoint': self.tcp.tristate_cvt(alt_z_ctrl_sp),
+                                      'Setpoint (A)': sp,
+                                      'Settling time (s)': settling_t
+                                      },
+                                        index=[0]).T  
+        if prt: 
+            print('\n'+
+                alt_z_ctrl_df.to_string(header=False)+
+                '\n\nAlternative Z controller set.')
+        return alt_z_ctrl_df   
+    
+    def BiasSpectrAltZCtrlGet(self, prt = if_print):
+        """
+        BiasSpectr.AltZCtrlGet
+        Returns the configuration of the alternate Z-controller setpoint in the Advanced section of the Bias Spectroscopy module.
+        
+        When switched on, the Z-controller setpoint is set to the defined setpoint right after starting the measurement. 
+        After changing the setpoint, the settling time will be waited for the Z-controller to adjust to the modified setpoint.
+        Then, Z averaging will start, and the original setpoint is restored at the end of the measurement, before restoring the Z-controller state.
+        
+        Arguments: None
+        
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Alternate Z-controller setpoint (unsigned int16): 0 means Off, 1 means On
+        - Setpoint (float32): The current setpoint for the Z-controller
+        - Settling time (float32): The configured settling time (in seconds)
+        - Error described in the Response message>Body section
+        """
+        header = self.tcp.header_construct('BiasSpectr.AltZCtrlGet', 0)
+    
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('uint16', 'float32', 'float32')
+    
+        self.tcp.print_err(res_err)
+        alt_z_ctrl_df = pd.DataFrame({'Alternative Z-controller setpoint': self.tcp.bistate_cvt(res_arg[0]),
+                                      'Setpoint (A)': res_arg[1],
+                                      'Settling time (s)': res_arg[2]
+                                      },
+                                      index=[0]).T  
+        if prt: 
+            print('\n'+
+                alt_z_ctrl_df.to_string(header=False)+
+                '\n\nAlternative Z controller settings returned.')
+        return alt_z_ctrl_df   
+    
+    def BiasSpectrMLSLockinPerSegSet(self, lockin_per_seg, prt = if_print):
+        """
+        BiasSpectr.MLSLockinPerSegSet
+        Sets the Lock-In per Segment flag in the Multi Line Segment editor.
+    
+        When enabled, the Lock-In can be configured for each segment in the Multi Line Segment editor. 
+        Otherwise, the Lock-In is applied globally according to the flag in the Advanced section of Bias spectroscopy.
+    
+        Arguments:
+        - Lock-In per segment (unsigned int32): 0 means Off, 1 means On
+    
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        body  = self.tcp.dtype_cvt(lockin_per_seg, 'uint32', 'bin')
+        header = self.tcp.header_construct('BiasSpectr.MLSLockinPerSegSet', len(body))
+        cmd = header + body
+    
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+    
+        self.tcp.print_err(res_err)
+        lockin_per_seg_df = pd.DataFrame({'Lock-in per segment': self.tcp.bistate_cvt(lockin_per_seg)},
+                                index=[0]).T
+        if prt: 
+            print('\n'+
+                lockin_per_seg_df.to_string(header=False)+
+                '\n\nLock-In per Segment flag in Multi line segment editor set.')
+        return lockin_per_seg_df
+    
+    def BiasSpectrMLSLockinPerSegGet(self, prt = if_print):
+        """
+        BiasSpectr.MLSLockinPerSegGet
+        Returns the Lock-In per Segment flag in the Multi Line Segment editor.
+        
+        When selected, the Lock-In can be defined per segment. Otherwise, it is set globally.
+        
+        Arguments: None
+        
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Lock-In per segment (unsigned int32): 0 means Off, 1 means On
+        - Error described in the Response message>Body section
+        """
+        header = self.tcp.header_construct('BiasSpectr.MLSLockinPerSegGet', 0)
+    
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('uint32')
+    
+        self.tcp.print_err(res_err)
+        lockin_per_seg_df = pd.DataFrame({'Lock-in per segment': self.tcp.bistate_cvt(res_arg[0])},
+                                index=[0]).T
+        if prt: 
+            print('\n'+
+                lockin_per_seg_df.to_string(header=False)+
+                '\n\nLock-In per Segment flag in Multi line segment editor settings returned.')
+        return lockin_per_seg_df          
+    
+    def BiasSpectrMLSModeSet(self, sweep_mode, prt = if_print):
+        """
+        BiasSpectr.MLSModeSet
+        Sets the Bias Spectroscopy sweep mode.
+        
+        Arguments:
+        - Sweep mode (int): The number of characters in the sweep mode string. For example, 6 for 'Linear' and 3 for 'MLS'
+        - Sweep mode (string): 'Linear' for Linear mode or 'MLS' for MultiSegment mode
+        
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        # sweep mode: 'Linear' or 'MLS'
+        sweep_mode_len = len(sweep_mode)
+    
+        body  = self.tcp.dtype_cvt(sweep_mode_len, 'int', 'bin')
+        body += self.tcp.dtype_cvt(sweep_mode, 'str', 'bin')
+        header = self.tcp.header_construct('BiasSpectr.MLSModeSet', body_size = len(body))
+        cmd = header + body
+    
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+    
+        self.tcp.print_err(res_err)
+        mls_mode_df = pd.DataFrame({'Sweep mode': sweep_mode},
+                                 index=[0]).T
+        if prt: 
+            print('\n'+
+                mls_mode_df.to_string(header=False)+
+                '\n\nBias spectroscopy sweep mode set.')
+        return mls_mode_df
+    
+    def BiasSpectrMLSModeGet(self, prt = if_print):
+        """
+        BiasSpectr.MLSModeGet
+        Returns the Bias Spectroscopy sweep mode.
+    
+        Arguments: None
+    
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Sweep mode (int): Number of characters in the sweep mode string. 6 for 'Linear', 3 for 'MLS'
+        - Sweep mode (string): 'Linear' for Linear mode or 'MLS' for MultiSegment mode
+        - Error described in the Response message>Body section
+        """
+        header = self.tcp.header_construct('BiasSpectr.MLSModeGet', 0)
+    
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int', 'str') 
+    
+        self.tcp.print_err(res_err)
+        mls_mode_df = pd.DataFrame({'Sweep mode': res_arg[1]},
+                                index=[0]).T
+        if prt: 
+            print('\n'+
+                mls_mode_df.to_string(header=False)+
+                '\n\nLock-In per Segment flag in Multi line segment editor settings returned.')
+        return mls_mode_df 
+    
+    def BiasSpectrMLSValsSet(self, num_segs, bias_start, bias_end, init_settling_t, settling_t, inte_t, steps, lockin_run, prt = if_print):
+        """
+        BiasSpectr.MLSValsSet
+        Sets the bias spectroscopy multiple line segment configuration for Multi Line Segment mode.
+    
+        Up to 16 distinct line segments may be defined. Any segments beyond the maximum allowed will be ignored.
+    
+        Arguments:
+        - Number of segments (int): Number of segments configured in MLS mode. This value determines the size of the 1D arrays set afterwards
+        - Bias start (V) (1D array float32): Start bias value (V) for each segment
+        - Bias end (V) (1D array float32): End bias value (V) for each segment
+        - Initial settling time (s) (1D array float32): Time to wait at the beginning of each segment after applying the Lock-In setting
+        - Settling time (s) (1D array float32): Time to wait before measuring each data point within the segment
+        - Integration time (s) (1D array float32): Time during which the data are acquired and averaged for each segment
+        - Steps (1D array int): Number of steps to measure in each segment
+        - Lock-In run (1D array unsigned int32): Indicates if Lock-In will run during the segment (requires the global Lock-In per Segment flag to be enabled)
+    
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Error described in the Response message>Body section
+        """
+        bias_start = self.tcp.unit_cvt(bias_start)
+        bias_end = self.tcp.unit_cvt(bias_end)
+        init_settling_t = self.tcp.unit_cvt(init_settling_t)
+        settling_t = self.tcp.unit_cvt(settling_t)
+        inte_t = self.tcp.unit_cvt(inte_t)
+    
+        body  = self.tcp.dtype_cvt(num_segs, 'int', 'bin')
+        body += self.tcp.dtype_cvt(bias_start, '1dfloat32', 'bin')
+        body += self.tcp.dtype_cvt(bias_end, '1dfloat32', 'bin')
+        body += self.tcp.dtype_cvt(init_settling_t, '1dfloat32', 'bin')
+        body += self.tcp.dtype_cvt(settling_t, '1dfloat32', 'bin')
+        body += self.tcp.dtype_cvt(inte_t, '1dfloat32', 'bin')
+        body += self.tcp.dtype_cvt(steps, '1dint', 'bin')
+        body += self.tcp.dtype_cvt(lockin_run, '1duint32', 'bin')
+        header = self.tcp.header_construct('BiasSpectr.MLSValsSet', body_size = len(body))
+        cmd = header + body
+    
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+    
+        self.tcp.print_err(res_err)
+        mls_df = pd.DataFrame({'Number of segments': num_segs,
+                               'Bias start (V)': bias_start,
+                               'Bias end (V)': bias_end,
+                               'Initial settling time (s)': init_settling_t,
+                               'Settling time (s)': settling_t,
+                               'Integration time (s)': inte_t,
+                               'Steps': steps,
+                               'Lock-in run': lockin_run},
+                                 index=[0]).T
+        if prt: 
+            print('\n'+
+                mls_df.to_string(header=False)+
+                '\n\nBias sepectroscopy line segment configuration for Multi Line Segment mode set.')
+        return mls_df 
+       
+    def BiasSpectrMLSValsGet(self, prt = if_print): # might encounter issues when having multiple segaments
+        """
+        BiasSpectr.MLSValsGet
+        Returns the bias spectroscopy multiple line segment configuration for Multi Line Segment mode.
+    
+        Up to 16 distinct line segments may be defined.
+    
+        Arguments: None
+    
+        Return arguments (if Send response back flag is set to True when sending request message):
+        - Number of segments (int): Indicates the number of segments configured in MLS mode
+        - Bias start (V) (1D array float32): Start bias value (V) for each segment
+        - Bias end (V) (1D array float32): End bias value (V) for each segment
+        - Initial settling time (s) (1D array float32): Time to wait at the beginning of each segment
+        - Settling time (s) (1D array float32): Time to wait before each data point measurement
+        - Integration time (s) (1D array float32): Time for data acquisition and averaging for each segment
+        - Steps (1D array int): Number of steps to measure in each segment
+        - Lock-In run (1D array unsigned int32): Lock-In status per segment
+        - Error described in the Response message>Body section
+        """
+        header = self.tcp.header_construct('BiasSpectr.MLSValsGet', body_size = 0)
+    
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int', '1dfloat32', '1dfloat32', '1dfloat32', '1dfloat32', '1dfloat32', '1dint', '1duint32')
+    
+        self.tcp.print_err(res_err)
+        mls_df = pd.DataFrame({'Number of segments': res_arg[0],
+                               'Bias start (V)': res_arg[1],
+                               'Bias end (V)': res_arg[2],
+                               'Initial settling time (s)': res_arg[3],
+                               'Settling time (s)': res_arg[4],
+                               'Integration time (s)': res_arg[5],
+                               'Steps': res_arg[6],
+                               'Lock-in run': res_arg[7]},
+                                index=[0]).T
+        if prt: 
+            print('\n'+
+                mls_df.to_string(header=False)+
+                '\n\nBias sepectroscopy line segment configuration for Multi Line Segment mode settings returned.')
+        return mls_df 
+        
+        
+        
+        
+        
+        
         
 ######################################## Current Module #############################################
     def CurrentGet(self, prt = if_print):

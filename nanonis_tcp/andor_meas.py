@@ -40,7 +40,7 @@ class andor_meas:
         """
         if wl< 0:
             body="{:.5f}".format(0)
-            raise ValueError('The minimum allowed wavelength is 0 (zeroth order reflection) 10V. Please check your input! Center wavelength has been set to zero')    
+            raise ValueError('The minimum allowed wavelength is 0 (zeroth order reflection). Please check your input! Center wavelength has been set to zero')    
         
         body="{:.5f}".format(wl)
         header = 'SWL '
@@ -114,6 +114,95 @@ class andor_meas:
         if prt: 
             print('\n' + result)
         return result 
+    
+    def acqnum_set(self, acqnum, prt=if_print):
+        """
+        Sets the number of acquisitions - always use 1. 
+
+        Raises:
+            ValueError: If the time is out of range 
+
+        Returns:
+            response from Andor
+        """
+        if acqnum<=0 and acqnum>10:
+            body="{:.0f}".format(1)
+            raise ValueError('Only >0 and < 10 are allowed')    
+
+        body="{:.0f}".format(acqnum)
+        header = 'SAN '
+        cmd = header + body +self.tcp.termination_char
+
+        self.tcp.cmd_send(cmd)
+        result= self.tcp.recv_until()
+        
+        if prt: 
+            print('\n' + result)
+        return result 
+    
+    def acqmode_set(self, mode, prt=if_print):
+        """
+        Sets the mode of acquisition - 0  or "FVB" or True means full vertical binning,  0  or "FVB" True means full vertical binning
+                                       4  or "IMG" or False 2d image mode,  recommended frequency 1MHz or 2MHz
+
+        Raises:
+            ValueError: If the time is out of range 
+
+        Returns:
+            response from Andor
+        """
+        
+        if mode in ["FVB", 0,True]:
+            mode = 0
+        elif mode in ["IMG", 4,False]:
+            mode = 4
+        else:
+            raise ValueError("Invalid mode. Use 'FVB', 'IMG', 0 or 4, True or False") 
+
+        body="{:.0f}".format(mode)
+        header = 'SRM '
+        cmd = header + body +self.tcp.termination_char
+
+        self.tcp.cmd_send(cmd)
+        result= self.tcp.recv_until()
+        
+        if prt: 
+            print('\n' + result)
+        return result
+    
+    def acqfreq_set(self, freq, prt=if_print):
+        """
+        Sets the freq of acquisition in kHz - 0  or "2000" means 2 MHz
+                                           1 or "1000" means 
+                                           
+
+        Raises:
+            ValueError: If the time is out of range 
+
+        Returns:
+            response from Andor
+        """
+        
+        if freq in ["50", 2, 50]:
+            freq = 2
+        elif freq in ["1000", 1, 1000]:
+            freq = 1
+        elif freq in ["2000", 0,2000]:
+            freq = 0
+        else:
+            raise ValueError("Invalid freq. Use '50', '1000', '2000' or  2, 1, 0 or 50, 1000, 2000") 
+
+        body="{:.0f}".format(freq)
+        header = 'SHS '
+        cmd = header + body +self.tcp.termination_char
+
+        self.tcp.cmd_send(cmd)
+        result= self.tcp.recv_until()
+        
+        if prt: 
+            print('\n' + result)
+        return result
+        
     
     def acquisition_set(self, prt=if_print):
         """
