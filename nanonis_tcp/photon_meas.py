@@ -1300,6 +1300,7 @@ class photon_meas:
 
     def photon_map_v2(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False):
         self.connect2.acqtime_set(acqtime)
+        self.connect2.acqnum_set(acqnum)
         # Initialize variables
         if direction in ["up", True, 0]:
             direction = "up"
@@ -1312,17 +1313,17 @@ class photon_meas:
         signal_names_df = self.connect.SignalsNamesGet()
         SF = self.connect.ScanFrameGet()  # Retrieve scan frame
         settings=self.connect2.settings_get()
-        if dim is None:
-            dim=(1e9*SF.values[2][0],1e9*SF.values[3][0])
+        if dim is None: 
+            dim=(1e9*SF.values[2][0],1e9*SF.values[3][0]) # gets the dimension from the scan frame
         cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]  # Extract center and angle
         wait_num = True  # Wait flag
     
-        channels_of_interest = ['Z (m)', 'Current (A)', 'LI Demod 1 Y (A)', 'LI Demod 2 Y (A)', 'Counter 1 (Hz)']
+       # channels_of_interest = ['Z (m)', 'Current (A)', 'LI Demod 1 Y (A)', 'LI Demod 2 Y (A)', 'Counter 1 (Hz)']
         data_ar=[]
         sigval_ar=[]
         counter,count_write=0,0
         
-        relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
+        relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names) #filter only selected channels to save 
         
         nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
         nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.float64)
@@ -1572,9 +1573,10 @@ Channels=Counts
             andor_chan_names= data.iloc[:, 0].values.tolist()
             nanonis_chan_names=sigvals_df['Signal names'].tolist()
             
-            nanononis_data_to_sxm=np.array(sigval_ar).T
-            andor_data_to_sxm=np.array(data_ar).T
-            combined_data = np.vstack((nanononis_data_to_sxm, andor_data_to_sxm))
+            nanononis_data_to_sxm = np.array(sigval_ar, dtype=np.float32).T
+            andor_data_to_sxm = np.array(data_ar, dtype=np.float32).T
+            combined_data = np.concatenate((nanononis_data_to_sxm, andor_data_to_sxm), axis=0)
+            del nanononis_data_to_sxm, andor_data_to_sxm #delete intermediate data
             
                         # Define constants
             scan_dir = 'both'
@@ -1595,6 +1597,7 @@ Channels=Counts
                 final_list.append([i, name, 'nm', scan_dir, default_value1, default_value2])
 
             data_sxm=self.connect.writesxm(backward,filename_sxm, settings_dict, scan_par, final_list, combined_data)
+            del combined_data
 
             # Ensure that `data` is created even if interrupted
      
@@ -1619,7 +1622,7 @@ Channels=Counts
         signal_names_df = self.connect.SignalsNamesGet()
         SF = self.connect.ScanFrameGet()  # Retrieve scan frame
         settings=self.connect2.settings_get()
-        if dim is None:
+        if dim is None: 
             dim=(1e9*SF.values[2][0],1e9*SF.values[3][0])
         cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]  # Extract center and angle
         wait_num = True  # Wait flag
@@ -2128,24 +2131,37 @@ Channels=Integer
         return bias_par
     
     def bias_spectr_par_save(self, bias_par, fdir, fname = ''):
-        with open(fdir + '/BiasSpectr' + fname + '.par', 'wb') as handle:
+        with open(fdir + '/' + fname + '.par', 'wb') as handle:
             pickle.dump(bias_par, handle)
         print(f'".par" file created in {fdir}')
 
     def bias_spectr_par_load(self, fdir, fname):
         with open(fdir + '/' + fname, 'rb') as handle:
             bias_par = pickle.load(handle)
-        for keys in bias_par:
-            bias_par[keys] = bias_par[keys].replace(['No change', 'Yes/On', 'No/Off', 'False/Off', 'True/On'], [0, 1, 2, 0, 1])
+        for key in bias_par:
+            if key in ["BiasSpectrMLSLockinPerSeg",'BiasSpectrMore','LockInOnOff1']:
+                try:
+                    bias_par[key] = bias_par[key].replace(['No change', 'Yes/On', 'No/Off', 'False/Off', 'True/On'], [0, 1, 2, 0, 1])
+                except:
+                    pass
+            else:
+                try:
+                    bias_par[key] = bias_par[key].replace(['No change', 'Yes/On', 'No/Off', 'False/Off', 'True/On'], [0, 1, 2, 2, 1])
+                except:
+                    pass
+            
+            # Ensure `bias_par[key]` is a pandas Series or DataFrame before using infer_objects
+            if isinstance(bias_par[key], (pd.Series, pd.DataFrame)):
+                bias_par[key] = bias_par[key].infer_objects(copy=False)
         return bias_par
 
     def bias_spectr(self, par, data_folder, basename = '%Y%m%d_', run = True):
         self.connect.BiasSpectrOpen()
         props = (int(par['BiasSpectrProps'].loc['Save all', 0]),
-                 int(par['BiasSpectrProps'].loc['Number of sweeps']),
+                 int(par['BiasSpectrProps'].loc['Number of sweeps',0]),
                  par['BiasSpectrProps'].loc['Backward sweep', 0],
-                 int(par['BiasSpectrProps'].loc['Number of points']),
-                 float(par['BiasSpectrTiming'].loc['Z offset (m)']),
+                 int(par['BiasSpectrProps'].loc['Number of points',0]),
+                 float(par['BiasSpectrTiming'].loc['Z offset (m)',0]),
                  par['BiasSpectrMore'].loc['Auto save', 0],
                  par['BiasSpectrMore'].loc['Save dialog', 0])
         self.connect.BiasSet(*par['Bias'].values)
