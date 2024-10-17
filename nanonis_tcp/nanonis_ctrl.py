@@ -19,6 +19,7 @@ class nanonis_ctrl:
         self.tcp = tcp
         # self.f_print = False
         self.mod_index=PLL_modulator_index
+        self.version=self.tcp.version
 
 # it is recommended to construct body first so that you don't need to calculate the body size by yourself
 # SI units are used in this module
@@ -458,7 +459,7 @@ class nanonis_ctrl:
                 '\n\nChannels set.')
         return chs_df
 
-    def BiasSpectrChsGet(self, prt = if_print):
+    def BiasSpectrChsGet_old(self, prt = if_print):
         """
         Get the current channels set for Bias Spectroscopy.
 
@@ -483,6 +484,45 @@ class nanonis_ctrl:
                 chs_df.to_string(header=False)+
                 '\n\n Channels returned.')
         return chs_df
+    
+    
+    
+    def BiasSpectrChsGet(self, prt=if_print):
+        """
+        Get the current channels set for Bias Spectroscopy, depending on the version of the Nanonis controller.
+    
+        Parameters:
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+    
+        Returns:
+            pd.DataFrame: A DataFrame with the number of channels, their indexes, and optionally names (if version >= 11798).
+        """
+        header = self.tcp.header_construct('BiasSpectr.ChsGet', body_size=0)
+        self.tcp.cmd_send(header)
+    
+        # Handling version differences
+        if self.version < 11798:
+            # Version < 11798: Receive only channel indexes
+            _, res_arg, res_err = self.tcp.res_recv('int', '1dint')
+            chs_df = pd.DataFrame({'Number of channels': res_arg[0],
+                                   'Channel indexes': [res_arg[1]]}, 
+                                   index=[0]).T
+        else:
+            # Version >= 11798: Receive channel indexes and names
+            _, res_arg, res_err = self.tcp.res_recv('int', '1dint', '1dstr')
+            chs_df = pd.DataFrame({'Number of channels': res_arg[0],
+                                   'Channel indexes': [res_arg[1]],
+                                   'Channel names': [res_arg[2]]}, 
+                                   index=[0]).T
+    
+        self.tcp.print_err(res_err)
+    
+        if prt:
+            print('\n' + chs_df.to_string(header=False) + 
+                  '\n\nChannels information returned.')
+        
+        return chs_df
+
 
     def BiasSpectrPropsSet(self, save_all, num_sweeps, bw_sweep, num_pts, z_offset, auto_save, show_save_dialog, prt = if_print):
         """
@@ -532,7 +572,7 @@ class nanonis_ctrl:
                 '\n\nBias spectroscopy properties set.')
         return props_df
 
-    def BiasSpectrPropsGet(self, prt = if_print):
+    def BiasSpectrPropsGet_old(self, prt = if_print):
         """
             BiasSpectr.PropsGet
             Returns the Bias Spectroscopy parameters.
@@ -601,6 +641,88 @@ class nanonis_ctrl:
                 '\n\nBias spectroscopy properties returned.')
         return props_df
     
+    
+    def BiasSpectrPropsGet(self, prt=if_print):
+        """
+            BiasSpectr.PropsGet
+            Returns the Bias Spectroscopy parameters.
+        
+            This function retrieves various parameters related to the Bias Spectroscopy module, 
+            and conditionally includes fields such as autosave and save_dialog based on the version.
+        
+            Arguments: None
+        
+            Return arguments (if Send response back flag is set to True when sending request message):
+            - Save all (unsigned int16)
+            - Number of sweeps (int)
+            - Backward sweep (unsigned int16)
+            - Number of points (int)
+            - Channels size (int)
+            - Number of channels (int)
+            - Channels (1D array string)
+            - Parameters size (int)
+            - Number of parameters (int)
+            - Parameters (1D array string)
+            - Fixed parameters size (int)
+            - Number of fixed parameters (int)
+            - Fixed parameters (1D array string)
+            - Autosave (unsigned int16) [Version >= X]: Autosave the data to an ASCII file (1 = On, 0 = Off)
+            - Save dialog (unsigned int16) [Version >= X]: Show the save dialog (1 = Show, 0 = Don't show)
+            - Error: Described in the Response message>Body section.
+        
+            Parameters:
+            - prt (bool): If True, prints the properties DataFrame (default is the value of if_print).
+        
+            Returns:
+            - props_df (DataFrame): DataFrame containing the Bias Spectroscopy properties.
+        """
+        
+        header = self.tcp.header_construct('BiasSpectr.PropsGet', body_size=0)
+        
+        # Send command
+        self.tcp.cmd_send(header)
+        
+        if self.version >= 11798:  # Replace X with the version where autosave and save_dialog are introduced
+            # For version >= 11798, include autosave and save_dialog
+            _, res_arg, res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
+                                                    'int', 'int', '1dstr', 'int', 'int', '1dstr', 
+                                                    'uint16', 'uint16')  # Autosave and save_dialog for newer versions
+        else:
+            # For older versions, do not include autosave and save_dialog
+            _, res_arg, res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
+                                                    'int', 'int', '1dstr', 'int', 'int', '1dstr')
+        
+        # Handle any errors in the response
+        self.tcp.print_err(res_err)
+        
+        # Create a DataFrame with the basic properties (valid for all versions)
+        props_dict = {
+            'Save all': self.tcp.bistate_cvt(res_arg[0]), 
+            'Number of sweeps': res_arg[1], 
+            'Backward sweep': self.tcp.bistate_cvt(res_arg[2]), 
+            'Number of points': res_arg[3], 
+            'Number of channels': res_arg[5],
+            'Channels': res_arg[6].tolist(), 
+            'Number of parameters': res_arg[8],
+            'Parameters': res_arg[9].tolist(),
+            'Number of fixed parameters': res_arg[11],
+            'Fixed parameters': res_arg[12].tolist()
+        }
+        
+        # If the version supports autosave and save_dialog, add them to the DataFrame
+        if self.version >= 11798:  # Again, replace X with the appropriate version
+            props_dict['Autosave'] = self.tcp.bistate_cvt(res_arg[13])  # Autosave flag
+            props_dict['Save dialog'] = self.tcp.bistate_cvt(res_arg[14])  # Save dialog flag
+        
+        # Convert the dictionary to a DataFrame
+        props_df = pd.DataFrame(props_dict, index=[0]).T
+        
+        # Print the DataFrame if prt is set to True
+        if prt:
+            print('\n' + props_df.to_string(header=False) + '\n\nBias spectroscopy properties returned.')
+        
+        return props_df
+
 
     def BiasSpectrAdvPropsSet(self, reset_bias, z_ctrl_hold, rec_final_z, lock_in_run, prt = if_print):
         """

@@ -17,11 +17,20 @@ class tcp_ctrl:
 ############################### functions #####################################
 #################### basic functions for creating commands ####################
     # create a connection between tcp client and nanonis software
-    def __init__(self, TCP_IP = '127.0.0.1', PORT = 6501, buffersize = 1048576): # buffer size = 10 kb
+    def __init__(self, TCP_IP = '127.0.0.1', PORT = 6501, buffersize = 1048576, version=999999): # buffer size = 10 kb
+        """
+       Parameters
+       IP              : Listening IP address
+       PORT            : Listening Port (check Nanonis File>Settings>TCP)
+       max_buf_size    : maximum size of the response message. just make it big
+       version         : Nanonis version. See Nanonis > help > info and take the RT Engine number.
+                         Defaults to the latest version of Nanonis 
+       """
         self.server_addr = (TCP_IP, PORT)
         self.sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sk.connect(self.server_addr)
         self.buffersize = buffersize
+        self.version = version
 
     # close socket
     def socket_close(self):
