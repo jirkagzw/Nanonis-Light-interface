@@ -684,16 +684,16 @@ class nanonis_ctrl:
         
         if self.version >= 11798:  # Replace X with the version where autosave and save_dialog are introduced
             # For version >= 11798, include autosave and save_dialog
-            _, res_arg, res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
+            _, res_ar,res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
                                                     'int', 'int', '1dstr', 'int', 'int', '1dstr', 
-                                                    'uint16', 'uint16')  # Autosave and save_dialog for newer versions
+                                                    'uint16', 'uint16',get_err = False)  # Autosave and save_dialog for newer versions
         else:
             # For older versions, do not include autosave and save_dialog
-            _, res_arg, res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
-                                                    'int', 'int', '1dstr', 'int', 'int', '1dstr')
+            _, res_arg,res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
+                                                    'int', 'int', '1dstr', 'int', 'int', '1dstr', get_err=False)
         
         # Handle any errors in the response
-        self.tcp.print_err(res_err)
+        #self.tcp.print_err(res_err)
         
         # Create a DataFrame with the basic properties (valid for all versions)
         props_dict = {
