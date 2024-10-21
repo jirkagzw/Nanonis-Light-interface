@@ -676,13 +676,13 @@ class nanonis_ctrl:
             Returns:
             - props_df (DataFrame): DataFrame containing the Bias Spectroscopy properties.
         """
-        
+        version_new=99999
         header = self.tcp.header_construct('BiasSpectr.PropsGet', body_size=0)
         
         # Send command
         self.tcp.cmd_send(header)
         
-        if self.version >=99999:  # Replace X with the version where autosave and save_dialog are introduced
+        if self.version >=version_new:  # Replace X with the version where autosave and save_dialog are introduced
             # For version >= 11798, include autosave and save_dialog
             _, res_ar,res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
                                                     'int', 'int', '1dstr', 'int', 'int', '1dstr', 
@@ -710,7 +710,7 @@ class nanonis_ctrl:
         }
         
         # If the version supports autosave and save_dialog, add them to the DataFrame
-        if self.version >= 11798:  # Again, replace X with the appropriate version
+        if self.version >= version_new:  # Again, replace X with the appropriate version
             props_dict['Autosave'] = self.tcp.bistate_cvt(res_arg[13])  # Autosave flag
             props_dict['Save dialog'] = self.tcp.bistate_cvt(res_arg[14])  # Save dialog flag
         
