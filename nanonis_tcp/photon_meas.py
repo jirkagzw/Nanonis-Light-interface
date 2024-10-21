@@ -2118,7 +2118,7 @@ Channels=Integer
                     'BiasSpectrAdvProps': self.connect.BiasSpectrAdvPropsGet(),
                     'BiasSpectrLimits': self.connect.BiasSpectrLimitsGet(),
                     'BiasSpectrTiming': self.connect.BiasSpectrTimingGet(),
-                    'BiasSpectrTTLSync': self.connect.BiasSpectrTTLSyncGet(),
+                   # 'BiasSpectrTTLSync': self.connect.BiasSpectrTTLSyncGet(), #doesnt work with version in lab
                     'BiasSpectrAltZCtrl': self.connect.BiasSpectrAltZCtrlGet(),
                     'BiasSpectrMLSLockinPerSeg': self.connect.BiasSpectrMLSLockinPerSegGet(),
                     'BiasSpectrMLSMode': self.connect.BiasSpectrMLSModeGet(),
@@ -2170,7 +2170,7 @@ Channels=Integer
         self.connect.BiasSpectrAdvPropsSet(*par['BiasSpectrAdvProps'].values)
         self.connect.BiasSpectrLimitsSet(*par['BiasSpectrLimits'].values)
         self.connect.BiasSpectrTimingSet(*par['BiasSpectrTiming'].values)
-        self.connect.BiasSpectrTTLSyncSet(*par['BiasSpectrTTLSync'].values)
+       # self.connect.BiasSpectrTTLSyncSet(*par['BiasSpectrTTLSync'].values)
         self.connect.BiasSpectrAltZCtrlSet(*par['BiasSpectrAltZCtrl'].values)
         self.connect.BiasSpectrMLSLockinPerSegSet(*par['BiasSpectrMLSLockinPerSeg'].values)
         self.connect.BiasSpectrMLSModeSet(*par['BiasSpectrMLSMode'].values)
