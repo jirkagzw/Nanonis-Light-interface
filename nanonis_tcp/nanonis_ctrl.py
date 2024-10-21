@@ -432,7 +432,7 @@ class nanonis_ctrl:
 
         Parameters:
             num_chs (int): Number of channels to set.
-            ch_idx (list of int): List of channel indexes.
+            ch_idx (list of int): List of channel indexes. old version uses 
             prt (bool, optional): Whether to print the result. Default is `if_print`.
 
         Returns:
@@ -501,13 +501,13 @@ class nanonis_ctrl:
         self.tcp.cmd_send(header)
     
         # Handling version differences
-        if self.version < 11798:
+        if self.version < 99999: #11798
             # Version < 11798: Receive only channel indexes
             _, res_arg, res_err = self.tcp.res_recv('int', '1dint')
             chs_df = pd.DataFrame({'Number of channels': res_arg[0],
                                    'Channel indexes': [res_arg[1]]}, 
                                    index=[0]).T
-        else:
+        else: # disabled output of channels, indices are enough and simplier to handle 
             # Version >= 11798: Receive channel indexes and names
             _, res_arg, res_err = self.tcp.res_recv('int', '1dint', '1dstr')
             chs_df = pd.DataFrame({'Number of channels': res_arg[0],
@@ -682,7 +682,7 @@ class nanonis_ctrl:
         # Send command
         self.tcp.cmd_send(header)
         
-        if self.version >= 11798:  # Replace X with the version where autosave and save_dialog are introduced
+        if self.version >=99999:  # Replace X with the version where autosave and save_dialog are introduced
             # For version >= 11798, include autosave and save_dialog
             _, res_ar,res_err = self.tcp.res_recv('uint16', 'int', 'uint16', 'int', 'int', 'int', '1dstr', 
                                                     'int', 'int', '1dstr', 'int', 'int', '1dstr', 
@@ -1004,7 +1004,6 @@ class nanonis_ctrl:
         
     def BiasSpectrAltZCtrlSet(self, alt_z_ctrl_sp, sp, settling_t, prt = if_print):
         """
-        BiasSpectr.AltZCtrlSet
         Sets the configuration of the alternate Z-controller setpoint in the Advanced section of the Bias Spectroscopy module.
         
         When switched on, the Z-controller setpoint is set to the setpoint right after starting the measurement. 
@@ -1045,7 +1044,6 @@ class nanonis_ctrl:
     
     def BiasSpectrAltZCtrlGet(self, prt = if_print):
         """
-        BiasSpectr.AltZCtrlGet
         Returns the configuration of the alternate Z-controller setpoint in the Advanced section of the Bias Spectroscopy module.
         
         When switched on, the Z-controller setpoint is set to the defined setpoint right after starting the measurement. 
@@ -1079,7 +1077,6 @@ class nanonis_ctrl:
     
     def BiasSpectrMLSLockinPerSegSet(self, lockin_per_seg, prt = if_print):
         """
-        BiasSpectr.MLSLockinPerSegSet
         Sets the Lock-In per Segment flag in the Multi Line Segment editor.
     
         When enabled, the Lock-In can be configured for each segment in the Multi Line Segment editor. 
@@ -1136,7 +1133,6 @@ class nanonis_ctrl:
     
     def BiasSpectrMLSModeSet(self, sweep_mode, prt = if_print):
         """
-        BiasSpectr.MLSModeSet
         Sets the Bias Spectroscopy sweep mode.
         
         Arguments:
@@ -1168,7 +1164,6 @@ class nanonis_ctrl:
     
     def BiasSpectrMLSModeGet(self, prt = if_print):
         """
-        BiasSpectr.MLSModeGet
         Returns the Bias Spectroscopy sweep mode.
     
         Arguments: None
@@ -1194,7 +1189,6 @@ class nanonis_ctrl:
     
     def BiasSpectrMLSValsSet(self, num_segs, bias_start, bias_end, init_settling_t, settling_t, inte_t, steps, lockin_run, prt = if_print):
         """
-        BiasSpectr.MLSValsSet
         Sets the bias spectroscopy multiple line segment configuration for Multi Line Segment mode.
     
         Up to 16 distinct line segments may be defined. Any segments beyond the maximum allowed will be ignored.
@@ -1250,7 +1244,6 @@ class nanonis_ctrl:
        
     def BiasSpectrMLSValsGet(self, prt = if_print): # might encounter issues when having multiple segaments
         """
-        BiasSpectr.MLSValsGet
         Returns the bias spectroscopy multiple line segment configuration for Multi Line Segment mode.
     
         Up to 16 distinct line segments may be defined.
