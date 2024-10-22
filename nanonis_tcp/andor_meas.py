@@ -120,7 +120,7 @@ class andor_meas:
         Sets the number of acquisitions - always use 1. 
 
         Raises:
-            ValueError: If the time is out of range 
+            ValueError: If the timenumber of acquisitions is out of range 
 
         Returns:
             response from Andor
@@ -140,31 +140,73 @@ class andor_meas:
             print('\n' + result)
         return result 
     
-    def acqmode_set(self, mode, prt=if_print):
+    def readmode_set(self, mode, prt=if_print):
         """
-        Sets the mode of acquisition - 0  or "FVB" or True means full vertical binning,  0  or "FVB" True means full vertical binning
-                                       4  or "IMG" or False 2d image mode,  recommended frequency 1MHz or 2MHz
-
+        Sets the mode of read acquisition:
+            0 or "FVB" means Full Vertical Binning,
+            1 or "MLT" means Multi-Track,
+            2 or "RDT" means Random-Track,
+            3 or "SGT" means Single-Track,
+            4 or "IMG" means Image mode (recommended frequency 1 MHz or 2 MHz).
+    
         Raises:
-            ValueError: If the time is out of range 
-
+            ValueError: If the mode is out of range.
+    
         Returns:
-            response from Andor
+            Response from Andor.
         """
         
-        if mode in ["FVB", 0,True]:
+        if mode in ["FVB", 0]:
             mode = 0
-        elif mode in ["IMG", 4,False]:
+        elif mode in ["MLT", 1]:
+            mode = 1
+        elif mode in ["RDT", 2]:
+            mode = 2           
+        elif mode in ["SGT", 3]:
+            mode = 3
+        elif mode in ["IMG", 4]:
             mode = 4
         else:
-            raise ValueError("Invalid mode. Use 'FVB', 'IMG', 0 or 4, True or False") 
-
-        body="{:.0f}".format(mode)
+            raise ValueError("Invalid mode. Use 'FVB', 'MLT', 'RDT', 'SGT', 'IMG', or 0, 1, 2, 3, 4.") 
+    
+        body = "{:.0f}".format(mode)
         header = 'SRM '
-        cmd = header + body +self.tcp.termination_char
-
+        cmd = header + body + self.tcp.termination_char
+    
         self.tcp.cmd_send(cmd)
-        result= self.tcp.recv_until()
+        result = self.tcp.recv_until()
+        
+        if prt: 
+            print('\n' + result)
+        return result
+    
+    
+    def acqmode_set(self, mode, prt=if_print):
+        """
+        Sets the mode of acquisition:
+            1 or "S" or True means Single Scan,
+            3 or "K" or False means Kinetic for Kinetic series.
+    
+        Raises:
+            ValueError: If the mode is out of range.
+    
+        Returns:
+            Response from Andor.
+        """
+        
+        if mode in ["S", 1, True]:
+            mode = 1
+        elif mode in ["K", 3, False]:
+            mode = 3
+        else:
+            raise ValueError("Invalid mode. Use 'S', 'K', 1, 3, True, or False.") 
+    
+        body = "{:.0f}".format(mode)
+        header = 'SAM '
+        cmd = header + body + self.tcp.termination_char
+    
+        self.tcp.cmd_send(cmd)
+        result = self.tcp.recv_until()
         
         if prt: 
             print('\n' + result)

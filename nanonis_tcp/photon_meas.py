@@ -1185,7 +1185,7 @@ class photon_meas:
                         
         return data, sigvals2  
 
-    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None):# spectrum with only saving the relevant channels and using np array to store nanonis data
+    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None,readmode=0):# spectrum with only saving the relevant channels and using np array to store nanonis data
         name="AA"+name
         # Initialize variables
         self.connect2.acqtime_set(acqtime)
@@ -1197,7 +1197,17 @@ class photon_meas:
         nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
         nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.float64)
         #andor_array = np.full(andor_shape,np.nan, dtype=np.int64)
-
+        
+        # check if spectrograph setting is corrent and eventually change it
+        for index, row in settings.iterrows():
+            code = row['Code']
+            value = row['Value']
+            if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"]):
+                print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
+                self.connect2.readmode_set(readmode)
+            elif code == 'GAM' and value != 1:
+                print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
+                self.connect2.acqmode_set(1)
         data_dict = {}
         try:
             for i in range(int(acqnum)):
@@ -1608,7 +1618,7 @@ Channels=Counts
             #return data_sxm,combined_data
         
         
-    def photon_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False):
+    def photon_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):
         self.connect2.acqtime_set(acqtime)
         # Initialize variables
         if direction in ["up", True, 0]:
@@ -1621,7 +1631,19 @@ Channels=Counts
         folder = self.connect.UtilSessionPathGet().loc['Session path', 0]
         signal_names_df = self.connect.SignalsNamesGet()
         SF = self.connect.ScanFrameGet()  # Retrieve scan frame
+        
         settings=self.connect2.settings_get()
+        # check if spectrograph setting is corrent and eventually change it
+        for index, row in settings.iterrows():
+            code = row['Code']
+            value = row['Value']
+            if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"]):
+                print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
+                self.connect2.readmode_set(readmode)
+            elif code == 'GAM' and value != 1:
+                print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
+                self.connect2.acqmode_set(1)
+                
         if dim is None: 
             dim=(1e9*SF.values[2][0],1e9*SF.values[3][0])
         cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]  # Extract center and angle
