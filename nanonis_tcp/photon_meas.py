@@ -1202,7 +1202,7 @@ class photon_meas:
         for index, row in settings.iterrows():
             code = row['Code']
             value = row['Value']
-            if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"]):
+            if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"] or value != readmode):
                 print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
                 self.connect2.readmode_set(readmode)
             elif code == 'GAM' and value != 1:
