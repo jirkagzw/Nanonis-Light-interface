@@ -2849,7 +2849,7 @@ class nanonis_ctrl:
         Notes:
         - Clears existing data in the Tip Move Recorder graph when setting a new buffer size.
         """
-        body  = self.tcp.dtype_cvt(buffer_size, 'int')
+        body  = self.tcp.dtype_cvt(buffer_size, 'int','bin')
 
         header = self.tcp.header_construct('TipRec.BufferSizeSet', len(body))
         cmd = header + body
