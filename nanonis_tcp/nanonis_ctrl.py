@@ -2400,6 +2400,20 @@ class nanonis_ctrl:
 
 ######################################## Follow Me Module #############################################
     def FolMeXYPosSet(self, x, y, wait_end_of_mv, prt = if_print):
+        """
+        Moves the tip to the specified X and Y coordinates in meters with optional wait behavior.
+        
+        Parameters:
+        - x (float): Target X coordinate in meters.
+        - y (float): Target Y coordinate in meters.
+        - wait_end_of_mv (int): Determines if the function waits until the target is reached 
+          (1) or returns immediately (0).
+        - prt (bool, optional): Flag to enable printing of status information.
+        
+        Returns:
+        - pd.DataFrame: DataFrame displaying the set coordinates and move status.
+        """
+
         x = self.tcp.unit_cvt(x)
         y = self.tcp.unit_cvt(y)
 
@@ -2426,6 +2440,18 @@ class nanonis_ctrl:
         return folme_xypos_df
 
     def FolMeXYPosGet(self, wait_for_new_data, prt = if_print):
+        """
+        Retrieves the current X and Y coordinates of the tip, with optional wait for new data.
+        
+        Parameters:
+        - wait_for_new_data (int): Specifies whether to wait for a full period of new data (1) 
+          or to return the next available data (0).
+        - prt (bool, optional): Flag to enable printing of status information.
+        
+        Returns:
+        - pd.DataFrame: DataFrame displaying the current tip coordinates.
+        """
+
         body  = self.tcp.dtype_cvt(wait_for_new_data, 'uint32', 'bin')
         
         header = self.tcp.header_construct('FolMe.XYPosGet', len(body))
@@ -2447,6 +2473,19 @@ class nanonis_ctrl:
         return folme_xypos_df
 
     def FolMeSpeedSet(self, spd, cus_spd, prt = if_print):
+        """
+        Sets the tip speed in meters per second, with an option for custom speed.
+        
+        Parameters:
+        - spd (float): Speed setting in meters per second.
+        - cus_spd (int): Custom speed option as an integer.
+        - prt (bool, optional): Flag to enable printing of status information.
+        
+        Returns:
+        - pd.DataFrame: DataFrame displaying the set speed and custom speed status.
+        """
+
+
         spd = self.tcp.unit_cvt(spd)
 
         body  = self.tcp.dtype_cvt(spd, 'float32', 'bin')
@@ -2470,6 +2509,17 @@ class nanonis_ctrl:
         return speed_df
 
     def FolMeSpeedGet(self, prt = if_print):
+        """
+        Retrieves the current tip speed in meters per second.
+        
+        Parameters:
+        - prt (bool, optional): Flag to enable printing of status information.
+        
+        Returns:
+        - pd.DataFrame: DataFrame displaying the current tip speed and custom speed status.
+        """
+
+
         header = self.tcp.header_construct('FolMe.SpeedGet', 0)
 
         self.tcp.cmd_send(header)
@@ -2487,6 +2537,18 @@ class nanonis_ctrl:
         return speed_df
 
     def FolMeOversamplSet(self, oversampling, prt = if_print):
+        """
+        Sets the oversampling rate for data acquisition.
+        
+        Parameters:
+        - oversampling (int): Desired oversampling rate.
+        - prt (bool, optional): Flag to enable printing of status information.
+        
+        Returns:
+        - pd.DataFrame: DataFrame displaying the set oversampling rate.
+        """
+
+
         body  = self.tcp.dtype_cvt(oversampling, 'int', 'bin')
         
         header = self.tcp.header_construct('FolMe.OversamplSet', len(body))
@@ -2506,6 +2568,16 @@ class nanonis_ctrl:
         return oversmp_df
 
     def FolMeOversamplGet(self, prt = if_print):
+        """
+        Retrieves the current oversampling settings and sampling rate.
+    
+        Parameters:
+        - prt (bool, optional): Flag to enable printing of status information.
+    
+        Returns:
+        - pd.DataFrame: DataFrame displaying the oversampling rate and sampling rate.
+        """
+
         header = self.tcp.header_construct('FolMe.OversamplGet', 0)
 
         self.tcp.cmd_send(header)
@@ -2523,6 +2595,16 @@ class nanonis_ctrl:
         return oversmp_df
 
     def FolMeStop(self, prt = if_print):
+        """
+        Stops the tip movement immediately.
+    
+        Parameters:
+        - prt (bool, optional): Flag to enable printing of status information.
+    
+        Returns:
+        - None
+        """
+
         header = self.tcp.header_construct('FolMe.Stop', 0)
 
         self.tcp.cmd_send(header)
@@ -2536,6 +2618,17 @@ class nanonis_ctrl:
         return 
 
     def FolMePSOnOffGet(self, prt = if_print):
+        """
+        Retrieves the current status of the Point & Shoot feature.
+    
+        Parameters:
+        - prt (bool, optional): Flag to enable printing of status information.
+    
+        Returns:
+        - pd.DataFrame: DataFrame displaying the Point & Shoot status.
+        """
+
+
         header = self.tcp.header_construct('FolMe.PSOnOffGet', 0)
 
         self.tcp.cmd_send(header)
@@ -2552,6 +2645,9 @@ class nanonis_ctrl:
         return ps01_df
 
     def FolMePSOnOffSet(self, ps_01, prt = if_print):
+        
+
+        
         body  = self.tcp.dtype_cvt(ps_01, 'uint32', 'bin')
 
         header = self.tcp.header_construct('FolMe.PSOnOffSet', len(body))
@@ -2571,6 +2667,8 @@ class nanonis_ctrl:
         return ps01_df
 
     def FolMePSExpGet(self, prt = if_print):
+
+
         header = self.tcp.header_construct('FolMe.PSExpGet', 0)
 
         self.tcp.cmd_send(header)
@@ -2590,6 +2688,18 @@ class nanonis_ctrl:
         return ps_exp_df
 
     def FolMePSExpSet(self, ps_exp, prt = if_print):
+        """
+        Sets the current Point & Shoot experiment.
+    
+        Parameters:
+        - ps_exp (int): Identifier for the Point & Shoot experiment.
+        - prt (bool, optional): Flag to enable printing of status information.
+    
+        Returns:
+        - pd.DataFrame: DataFrame displaying the set Point & Shoot experiment identifier.
+        """
+
+
         body  = self.tcp.dtype_cvt(ps_exp, 'uint16', 'bin')
 
         header = self.tcp.header_construct('FolMe.PSExpSet', len(body))
@@ -2609,6 +2719,16 @@ class nanonis_ctrl:
         return ps_exp_df
 
     def FolMePSPropsGet(self, prt = if_print):
+        """
+        Retrieves properties of the Point & Shoot feature, including paths and delay settings.
+        
+        Parameters:
+        - prt (bool, optional): Flag to enable printing of status information.
+        
+        Returns:
+        - pd.DataFrame: DataFrame displaying Point & Shoot properties such as auto-resume status, 
+          basename, external VI path, and pre-measure delay.
+        """
         header = self.tcp.header_construct('FolMe.PSPropsGet', 0)
 
         self.tcp.cmd_send(header)
@@ -2631,6 +2751,22 @@ class nanonis_ctrl:
         return ps_props_df
 
     def FolMePSPropsSet(self, auto_resume, use_own_basename, basename, ext_VI_path_size, ext_VI_path, pre_meas_delay, prt = if_print):
+        """
+        Sets the properties for the Point & Shoot feature, including paths, basename, and delay.
+        
+        Parameters:
+        - auto_resume (int): Auto resume setting (e.g., 1 to enable).
+        - use_own_basename (int): Flag to indicate use of a custom basename.
+        - basename (str): Custom basename for Point & Shoot.
+        - ext_VI_path_size (int): Size of the external VI path string.
+        - ext_VI_path (str): Path for the external VI.
+        - pre_meas_delay (float): Delay in seconds before starting a measurement.
+        - prt (bool, optional): Flag to enable printing of status information.
+        
+        Returns:
+        - pd.DataFrame: DataFrame displaying the set Point & Shoot properties.
+        """
+
         pre_meas_delay = self.tcp.unit_cvt(pre_meas_delay)
         basename_size = len(basename)
 
@@ -2662,6 +2798,133 @@ class nanonis_ctrl:
               ps_props_df.to_string(header=False)+
               '\n\nPoint & Shoot properties set.')
         return ps_props_df
+    
+####################################### Tip Move Recorder #############################################  
+    def TipRecDataGet(self, prt = if_print):
+        """
+        Retrieve indexes and values of channels recorded in Follow Me mode.
+        
+        Sends a request to obtain channel indexes and recorded data values captured while the tip is moving
+        in Follow Me mode, as displayed in the Tip Move Recorder.
+        
+        Parameters
+        ----------
+        prt : bool, optional
+            Whether to print the result (default is if_print).
+        
+        Returns
+        -------
+        tuple
+            - list of int: Channel indexes representing recorded channels, each ranging from 0 to 23 for the
+              24 signals assigned in the Signals Manager.
+            - numpy.ndarray: 2D array of float32 values containing recorded data for each channel while in motion.
+        
+        Notes
+        -----
+        - The number of channels recorded is given by the length of the channel indexes array.
+        - Channel indexes refer to signals among the 24 assigned in the Signals Manager. Use `Signals.InSlotsGet` to retrieve 
+          the signal name corresponding to each index within the Nanonis Controller’s 128 available signals.
+        - Errors are logged if encountered, as described in the Response message Body section.
+        """
+        header = self.tcp.header_construct('TipRec.DataGet', 0)
+
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int', '1dint','int','int','2dfloat32')
+
+        self.tcp.print_err(res_err)
+        
+        return res_arg[1],res_arg[4]
+    
+    def TipRecBufferSizeSet(self, buffer_size, prt=if_print):
+        """
+        Sets the buffer size of the Tip Move Recorder, clearing the graph in the process.
+    
+        Parameters:
+        - buffer_size (int): The number of data elements to set in the Tip Move Recorder buffer.
+    
+        Returns:
+        - error_message (str, optional): If available, an error message described in the response message's 
+          Body section.
+        
+        Notes:
+        - Clears existing data in the Tip Move Recorder graph when setting a new buffer size.
+        """
+        body  = self.tcp.dtype_cvt(buffer_size, 'int')
+
+        header = self.tcp.header_construct('TipRec.BufferSizeSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+    
+    def TipRecBufferSizeGet(self, prt=if_print):
+        """
+        Retrieves the current buffer size of the Tip Move Recorder.
+    
+        Parameters:
+        - prt (bool): Optional; if True, prints the buffer size details in a formatted DataFrame.
+    
+        Returns:
+        - buffer_size (int): The current buffer size of the Tip Move Recorder.
+        - error_message (str, optional): If available, an error message described in the response message's 
+          Body section.
+        """
+        header = self.tcp.header_construct('TipRec.BufferSizeGet', 0)
+
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int')
+
+        self.tcp.print_err(res_err)
+        bs_df = pd.DataFrame({'Buffer size': res_arg[0],},index=[0]).T
+        if prt: 
+            print('\n'+
+              bs_df.to_string(header=False)+
+              '\n\nBuffer size Tip Rec returned.')
+        return bs_df
+    
+    def TipRecBufferClear(self, prt=if_print):
+        """
+        Clears the buffer of the Tip Move Recorder.
+    
+        Parameters:
+        - prt (bool): Optional; if True, prints a confirmation of the buffer clear action.
+    
+        Returns:
+        - error_message (str, optional): If available, an error message described in the response message's 
+          Body section.
+        
+        Notes:
+        - Clears all data in the Tip Move Recorder buffer, preparing it for new data acquisition.
+        """
+        header = self.tcp.header_construct('TipRec.BufferClear', 0)
+        self.tcp.cmd_send(header)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+    
+    
+    def TipRecDataSave(self, clear_buffer, basename, prt=if_print):
+        """
+        Saves the data acquired in Follow Me mode from the Tip Move Recorder to a file.
+    
+        Parameters:
+        - clear_buffer (int): Clears the buffer after saving the data. Use 0 for Off and 1 for On.
+        - basename (str): The basename of the file where data is saved. If empty, it will default to the last 
+          used basename.
+        - prt (bool): Optional; if True, prints confirmation of the save action.
+    
+        Returns:
+        - error_message (str, optional): If available, an error message described in the response message's 
+          Body section.
+        
+        Notes:
+        - If `clear_buffer` is set to 1, the buffer is cleared after the save operation.
+        """
+        pass
+
+    
+    
+    
 ######################################## Marks in Scan Module #############################################
     def MarksPointDraw(self, x, y, txt, color, prt = if_print):
         x = self.tcp.unit_cvt(x)

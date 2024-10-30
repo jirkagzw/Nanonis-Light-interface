@@ -802,6 +802,12 @@ class photon_meas:
         # Signal that acquisition is complete
         acquisition_complete.set()
         
+    def acquire_data_from_connect_relevant_2(self, signal_values,acquisition_complete, relevant_indices):
+        while not acquisition_complete.is_set():
+            # Collect signal values from the connect device
+            signal_values.append(self.connect2.SignalsValsGet(relevant_indices,0))
+           # time.sleep(0.1)  # Adjust sampling frequency as desired
+        
     def acquire_data_from_connect_new(self, signal_values, acquisition_complete, stop_time,signal_range):
         start_time = time.time()
         while not acquisition_complete.is_set() and (time.time() - start_time) < stop_time:
@@ -1399,7 +1405,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                         data_storage = {}
                         
                         # Start the thread to acquire data from connect2
-                        acquire_thread2 = threading.Thread(target=self.acquire_data_from_connect2, args=(data_storage, acquisition_complete_connect2))
+                        acquire_thread2 = threading.Thread(target=self.acquire_datdaa_from_connect2, args=(data_storage, acquisition_complete_connect2))
                         acquire_thread2.start()
                         
                         # Start a thread to acquire data from connect with a time limit
@@ -1919,8 +1925,242 @@ Channels=Counts
                           
             return data_sxm,combined_data
         
+        def photon_map_kinetic_v1(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):
+            # Events to coordinate between threads
+            acquisition_complete = threading.Event()
+            andor_ready = threading.Event()
+            position_ready = threading.Event()
+            stop_signal = threading.Event()  # Overall stop signal for acquisition
+            
+            # Placeholder function for Andor command
+            def send_andor_command():
+                print("Thread 1: Sending Andor command...")
+                # Simulate waiting for response from Andor
+                # Code for Andor command and response goes here
+                # Once response is received, signal readiness to other threads
+                andor_ready.set()
+                print("Thread 1: Andor command response received.")
+            
+            # Placeholder function to monitor port and set position
+            def monitor_port():
+                print("Thread 2: Waiting for Andor readiness...")
+                andor_ready.wait()  # Wait for the first thread to signal readiness
+                print("Thread 2: Andor is ready. Monitoring port...")
+                
+                while not stop_signal.is_set():
+                    # Code for readport and checking condition
+                    port_status = readport()  # Custom function returns 1 or 0
+                    if port_status == 1:
+                        print("Thread 2: Port condition met, setting position...")
+                        # Code for FolMeXYPosSet and waiting for response
+                        position_ready.set()  # Notify acquisition can be stopped
+                        break
+                print("Thread 2: Position set, stopping acquisition.")
+            
+            # Placeholder function for signal acquisition
+            def acquire_data_from_connect(signal_values):
+                print("Thread 3: Starting data acquisition...")
+                while not acquisition_complete.is_set():
+                    # Code for acquiring signals goes here
+                    pass
+                print("Thread 3: Acquisition stopped.")
+            
+            # Start threads
+            andor_thread = threading.Thread(target=send_andor_command)
+            port_thread = threading.Thread(target=monitor_port)
+            acquisition_thread = threading.Thread(target=acquire_data_from_connect, args=(signal_values,))
+            
+            # Start all threads
+            andor_thread.start()
+            port_thread.start()
+            acquisition_thread.start()
+            
+            # Synchronize threads as per completion of tasks
+            position_ready.wait()  # Wait for port thread to complete its task
+            acquisition_complete.set()  # Stop the acquisition thread
+            
+            # Join threads to ensure they complete
+            andor_thread.join()
+            port_thread.join()
+            acquisition_thread.join()
+            
+            print("All tasks completed.")
+            
+       
     
+    def zig_zag_move_acq(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):       
+        def bin_average_stacked(array, n):
+            m = array.shape[0]  # Number of rows (measurements)
+            bin_size = m / n
+            result = np.empty((n, array.shape[1]))
+            print(m,bin_size,n)
+            
+            for i in range(n):
+                start = int(i * bin_size)
+                end = int((i + 1) * bin_size)
+                result[i,:] = np.mean(array[start:end,:], axis=0)
+            return result
+
+        # Retrieve scan frame and set default dimensions if not provided
+        SF = self.connect.ScanFrameGet()
+        dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        signal_names_df=self.connect.SignalsNamesGet()
+        relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
+        
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2) if direction == "up" else (-dim[0] / 2, dim[1] / 2)
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+        # Move to the first point
+        #print(f"Moving to initial start point (dx_nm: {initial_dx_nm}, dy_nm: {initial_dy_nm})")
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
+        
+        mv_spd=1e-9*(np.sqrt(dim[0]**2+(dim[1]/pix[1]/2)**2)/(acqtime*pix[0]))
+        self.connect.FolMeSpeedSet(mv_spd,1)
+        
+        # Set scan direction parameters
+        row_range = range(2 * pix[1])# if direction == "up" else range(2 * pix[1] - 1, -1, -1)
+        dy_sign = -1 if direction == "up" else 1
+        
+        # Create the signal_array with NaN values
+        #signal_array = np.empty(len(row_range), dtype=object)
+        signal_array=np.full((len(row_range),pix[1],len(relevant_indices)), np.nan, dtype=np.float32)
+        print(signal_array.shape)
+        s_time=time.perf_counter()
+        # Start zigzag pattern)
+        for index, row in enumerate(row_range):
+        # You can now use 'index' to access signal_array
+
+            # Calculate y-coordinate for the current row
+            dy_nm = (dy_sign * dim[1] / 2) + (row + 1) * (dim[1] / pix[1]) / 2 * (-dy_sign)
+        
+            # Determine end x-coordinate based on row direction
+            end_dx_nm = dim[0] / 2 if row % 2 == 0 else -dim[0] / 2
+        
+            # Rotate the end coordinates and move to the end point of the current row
+            end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+           # print(f"{direction.capitalize()}ward scan - Moving to end point (dx_nm: {end_dx_nm}, dy_nm: {dy_nm})")
+           
+            # Event to stop acquisition
+            acquisition_complete = threading.Event()
+            signal_values = []            
+            time1 = time.perf_counter()
+            acquire_thread = threading.Thread(target=self.acquire_data_from_connect_relevant_2, args=(signal_values,acquisition_complete, relevant_indices))
+            acquire_thread.start()
+            time2 = time.perf_counter()
+            # Start move and wait for completion
+            self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True)
+            
+            # Signal acquisition to stop once movement is complete
+            acquisition_complete.set()
+            time3 = time.perf_counter()
+            # Wait for the move to complete and stop acquisition thread
+            acquire_thread.join()  # Ensure acquisition stops exactly when movement completes
+
+            
+            stacked_data = np.stack([df.iloc[:, 1].values for df in signal_values])
+            
+
+            signal_array[index]=bin_average_stacked(stacked_data,pix[0])
+            #signal_array[index]=bin_average_stacked(stacked_data,pix[0])
+            time4 = time.perf_counter()
+            print(len(signal_values), "{:.5f}".format(time4-time3),"{:.5f}".format(time3-time2),"{:.5f}".format(time2-time1))
+        e_time=time.perf_counter()
+        print("tot time", "{:.5f}".format(e_time-s_time))
+        self.connect.FolMeSpeedSet(mv_spd,0)
+        #return(np.stack(signal_array,axis=0))
+        return(signal_array)
+
+            
     
+    def zig_zag_move(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):       
+       
+        # Retrieve scan frame and set default dimensions if not provided
+        SF = self.connect.ScanFrameGet()
+        dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2) if direction == "up" else (-dim[0] / 2, dim[1] / 2)
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+        # Move to the first point
+        #print(f"Moving to initial start point (dx_nm: {initial_dx_nm}, dy_nm: {initial_dy_nm})")
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
+        
+        # Set scan direction parameters
+        row_range = range(2 * pix[1])# if direction == "up" else range(2 * pix[1] - 1, -1, -1)
+        dy_sign = -1 if direction == "up" else 1
+        
+        # Start zigzag pattern
+        for row in row_range:
+            # Calculate y-coordinate for the current row
+            dy_nm = (dy_sign * dim[1] / 2) + (row + 1) * (dim[1] / pix[1]) / 2 * (-dy_sign)
+        
+            # Determine end x-coordinate based on row direction
+            end_dx_nm = dim[0] / 2 if row % 2 == 0 else -dim[0] / 2
+        
+            # Rotate the end coordinates and move to the end point of the current row
+            end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+           # print(f"{direction.capitalize()}ward scan - Moving to end point (dx_nm: {end_dx_nm}, dy_nm: {dy_nm})")
+            self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True)
+      
+    def zig_zag_move_old(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):       
+    
+        SF=self.connect.ScanFrameGet()  # Retrieve scan frame
+        if dim is None:
+            dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0])  # Set dimensions if not provided
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]  # Extract center and angle
+        wait_num = True  # Wait flag
+        
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm = - dim[0]/2
+        initial_dy_nm = - dim[1]/2
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+        # Move to the first point
+        print(f"Moving to initial start point (dx_nm: {initial_dx_nm}, dy_nm: {initial_dy_nm})")
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot, wait_num)
+        
+        # Start zigzag pattern
+        if direction == "up":
+            for row in range(2*pix[1]):
+                # Calculate y-coordinate for the current row
+                dy_nm = - dim[1]/2 + (row+1) * (dim[1] / pix[1]) / 2
+        
+                # Determine end x-coordinate based on row direction
+                if row % 2 == 0:  # Left-to-right for even rows
+                    end_dx_nm = + dim[0]/2
+                else:  # Right-to-left for odd rows
+                    end_dx_nm = - dim[0]/2
+        
+                # Rotate the end coordinates
+                end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+        
+                # Move to end point of the current row
+                print(f"Upward scan - Moving to end point (dx_nm: {end_dx_nm}, dy_nm: {dy_nm})")
+                self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, wait_num)
+    
+        elif direction == "down":
+            for row in range(2*pix[1] - 1, -1, -1):
+                # Calculate y-coordinate for the current row
+                dy_nm = + dim[1]/2 - (row+1) * (dim[1] / pix[1]) / 2
+        
+                # Determine end x-coordinate based on row direction
+                if row % 2 == 0:  # Left-to-right for even rows
+                    end_dx_nm = + dim[0]/2
+                else:  # Right-to-left for odd rows
+                    end_dx_nm = - dim[0]/2
+        
+                # Rotate the end coordinates
+                end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+        
+                # Move to end point of the current row
+                print(f"Downward scan - Moving to end point (dx_nm: {end_dx_nm}, dy_nm: {dy_nm})")
+                self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, wait_num) 
+
+                
     def nanonis_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up"):
         # Initialize variables
 
