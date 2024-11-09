@@ -3814,6 +3814,24 @@ class nanonis_ctrl:
     #     return
 ######################################## Signals Module #############################################
     def SignalsNamesGet(self, prt = if_print):
+        """
+        Retrieve the list of available signal names.
+    
+        This function requests and receives a list of names for the 128 available signals within the software, which include physical inputs, outputs, and internal channels. The returned names can be used to identify and select signals by index.
+    
+        Parameters:
+        -----------
+        prt : bool, optional
+            If True, prints the DataFrame of signal names. Defaults to `if_print`.
+    
+        Returns:
+        --------
+        pd.DataFrame
+            DataFrame with a single column labeled 'Signal names' containing the list of signal names.
+            
+        Notes: incorrect response after calling it nx100 times in Qplus (version 13900), call it it the init instead!!!
+        """
+        
         header = self.tcp.header_construct('Signals.NamesGet', 0)
 
         self.tcp.cmd_send(header)
@@ -3830,6 +3848,30 @@ class nanonis_ctrl:
         return signal_name_df
     
     def SignalsValGet(self, signal_idx, wait_for_new, prt = if_print):
+        """
+        Retrieve the current value of a specified signal.
+    
+        This function returns the current value of a specified signal, which is oversampled during the acquisition period. It can be configured to wait for the next available data point to ensure recent values are retrieved.
+    
+        Parameters:
+        -----------
+        signal_idx : int
+            Index of the signal to retrieve the value from (0 to 127).
+        wait_for_new : bool
+            If True, waits for the next period of new data, ensuring the latest measurement is retrieved. If False, returns the current available value.
+        prt : bool, optional
+            If True, prints the DataFrame with signal index and value. Defaults to `if_print`.
+    
+        Returns:
+        --------
+        pd.DataFrame
+            DataFrame with two rows: 'Signal index' and 'Signal value' for the specified signal.
+    
+        Notes:
+        ------
+        - If `wait_for_new` is True, the first published data is discarded, and the function waits for the second, most recent value.
+        """
+        
         body  = self.tcp.dtype_cvt(signal_idx, 'int', 'bin')
         body += self.tcp.dtype_cvt(wait_for_new, 'uint32', 'bin')
         header = self.tcp.header_construct('Signals.ValGet', len(body))
@@ -3849,6 +3891,30 @@ class nanonis_ctrl:
         return signal_value_df
     
     def SignalsValsGet(self,signal_idxs, wait_for_new, prt = if_print):
+        """
+        Retrieve the current values for multiple specified signals.
+    
+        This function returns the values for a list of specified signals. It allows for retrieving either the next available values or waiting for the latest data.
+    
+        Parameters:
+        -----------
+        signal_idxs : list of int
+            List of indices of the signals to retrieve values from, with each index between 0 and 127.
+        wait_for_new : bool
+            If True, waits for the next period of new data, ensuring the latest measurements are retrieved. If False, returns the current available values.
+        prt : bool, optional
+            If True, prints the DataFrame of signal indices and values. Defaults to `if_print`.
+    
+        Returns:
+        --------
+        pd.DataFrame
+            DataFrame with two columns: 'Signal index' and 'Signal value' for each specified signal.
+    
+        Notes:
+        ------
+        - If `wait_for_new` is True, the function waits to retrieve the latest published values for each signal in the list.
+        """
+        
         body  = self.tcp.dtype_cvt(len(signal_idxs), 'int', 'bin')
         body += self.tcp.dtype_cvt(signal_idxs, '1dint', 'bin')
         body += self.tcp.dtype_cvt(wait_for_new, 'uint32', 'bin')
@@ -3866,6 +3932,277 @@ class nanonis_ctrl:
                 signal_values_df.to_string()+
                 '\n\nSignal values returned.')
         return signal_values_df
+    
+    def SignalsInSlotSet(self, slot, rt_signal_index, prt=True):
+        """
+        Assigns one of the 128 available signals to one of the 24 slots in the Signals Manager.
+        
+        Args:
+            slot (int): The index of the slot in the Signals Manager where the RT signal will be assigned (0-23).
+            rt_signal_index (int): The index of the RT signal to assign to the selected slot (0-127).
+            prt (bool, optional): If True, prints a confirmation message. Default is True.
+            
+        Returns:
+            None
+        """
+        body = self.tcp.dtype_cvt(slot, 'int', 'bin')
+        body += self.tcp.dtype_cvt(rt_signal_index, 'int', 'bin')
+        header = self.tcp.header_construct('Signals.InSlotSet', len(body))
+        cmd = header + body
+        
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        
+        self.tcp.print_err(res_err)
+        if prt:
+            print(f'Signal {rt_signal_index} assigned to slot {slot}.')
+
+    def SignalsInSlotsGet(self, prt=True):
+        """
+        Returns a list of the signals names and indexes assigned to the 24 slots in the Signals Manager.
+        
+        Args:
+            prt (bool, optional): If True, prints the signal names and indexes. Default is True.
+            
+        Returns:
+            pd.DataFrame: DataFrame containing the slot assignments.
+        """
+        header = self.tcp.header_construct('Signals.InSlotsGet', 0)
+        
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int','int', '1dstr','int', '1dint')
+        
+        self.tcp.print_err(res_err)
+        signal_slots_df = pd.DataFrame({
+            'Signal names': res_arg[2].flatten(),
+            'Signal indexes': res_arg[4].flatten()
+        })
+        
+        if prt:
+            print(signal_slots_df.to_string(), '\n\nSlot assignments retrieved.')
+        
+        return signal_slots_df
+
+    def SignalsCalibrGet(self, signal_idx, prt=True):
+        """
+        Retrieves the calibration factor and offset of the selected signal.
+        
+        Args:
+            signal_idx (int): The index of the signal (0-127).
+            prt (bool, optional): If True, prints the calibration details. Default is True.
+            
+        Returns:
+            pd.DataFrame: DataFrame with calibration and offset.
+        """
+        body = self.tcp.dtype_cvt(signal_idx, 'int', 'bin')
+        header = self.tcp.header_construct('Signals.CalibrGet', len(body))
+        cmd = header + body
+        
+        self.tcp.cmd_send(cmd)
+        _, res_arg, res_err = self.tcp.res_recv('float32', 'float32')
+        
+        self.tcp.print_err(res_err)
+        calibr_df = pd.DataFrame({
+            'Calibration per volt': [res_arg[0]],
+            'Offset': [res_arg[1]]
+        })
+        
+        if prt:
+            print(calibr_df.to_string(), '\n\nCalibration details retrieved.')
+        
+        return calibr_df
+
+    def SignalsRangeGet(self, signal_idx, prt=True):
+        """
+        Retrieves the range limits (maximum and minimum) for the selected signal.
+        
+        Args:
+            signal_idx (int): The index of the signal (0-127).
+            prt (bool, optional): If True, prints the range details. Default is True.
+            
+        Returns:
+            pd.DataFrame: DataFrame with range limits.
+        """
+        body = self.tcp.dtype_cvt(signal_idx, 'int', 'bin')
+        header = self.tcp.header_construct('Signals.RangeGet', len(body))
+        cmd = header + body
+        
+        self.tcp.cmd_send(cmd)
+        _, res_arg, res_err = self.tcp.res_recv('float32', 'float32')
+        
+        self.tcp.print_err(res_err)
+        range_df = pd.DataFrame({
+            'Maximum limit': [res_arg[0]],
+            'Minimum limit': [res_arg[1]]
+        })
+        
+        if prt:
+            print(range_df.to_string(), '\n\nRange limits retrieved.')
+        
+        return range_df
+
+    def SignalsMeasNamesGet(self, prt=True):
+        """
+        Retrieves the list of measurement channels names available in the software.
+        
+        Args:
+            prt (bool, optional): If True, prints the measurement channels. Default is True.
+            
+        Returns:
+            pd.DataFrame: DataFrame with measurement channel names.
+        """
+        header = self.tcp.header_construct('Signals.MeasNamesGet', 0)
+        
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int', 'int', '1dstr')
+        
+        self.tcp.print_err(res_err)
+        meas_names_df = pd.DataFrame({'Measurement channel names': res_arg[2].flatten()})
+        
+        if prt:
+            print(meas_names_df.to_string(), '\n\nMeasurement channels retrieved.')
+        
+        return meas_names_df
+
+    def SignalsAddRTGet(self, prt=True):
+        """
+        Retrieves the names of additional RT signals available and those assigned to the Internal 23 and 24 signals.
+        
+        Args:
+            prt (bool, optional): If True, prints the additional RT signal names. Default is True.
+            
+        Returns:
+            pd.DataFrame: DataFrame with additional RT signal names and assigned Internal signals.
+        """
+        header = self.tcp.header_construct('Signals.AddRTGet', 0)
+        
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int', 'int', '1dstr', 'str', 'str')
+        self.tcp.res.recv()
+        
+        self.tcp.print_err(res_err)
+        rt_signals_df = pd.DataFrame({
+            'Additional RT signals': res_arg[2].flatten(),
+            'Internal 23 assigned signal': [res_arg[3]],
+            'Internal 24 assigned signal': [res_arg[4]]
+        })
+        
+        if prt:
+            print(rt_signals_df.to_string(), '\n\nAdditional RT signals retrieved.')
+        
+        return rt_signals_df
+
+    def SignalsAddRTSet(self, rt_signal1, rt_signal2, prt=True):
+        """
+        Assigns additional RT signals to the Internal 23 and 24 signals in the Signals Manager.
+        
+        Args:
+            rt_signal1 (int): Index of the RT signal assigned to Internal 23.
+            rt_signal2 (int): Index of the RT signal assigned to Internal 24.
+            prt (bool, optional): If True, prints a confirmation message. Default is True.
+            
+        Returns:
+            None
+        """
+        body = self.tcp.dtype_cvt(rt_signal1, 'int', 'bin')
+        body += self.tcp.dtype_cvt(rt_signal2, 'int', 'bin')
+        header = self.tcp.header_construct('Signals.AddRTSet', len(body))
+        cmd = header + body
+        
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        
+        self.tcp.print_err(res_err)
+        if prt:
+            print(f'Assigned RT signal {rt_signal1} to Internal 23 and RT signal {rt_signal2} to Internal 24.')
+    
+
+######################################## Digital Lines #############################################
+
+    def DigLines_PropsSet(self, digital_line, port, direction, polarity, prt=True):
+        """
+        Configures the properties of a digital line.
+        
+        Args:
+            digital_line (int): Digital line to configure (1 to 8).
+            port (int): Digital port (0=Port A, 1=Port B, 2=Port C, 3=Port D).
+            direction (int): Direction of the selected digital line (0=Input, 1=Output).
+            polarity (int): Polarity (0=Low active, 1=High active).
+            prt (bool, optional): If True, prints confirmation. Default is True.
+            
+        Returns:
+            str: Error message from response (if applicable).
+        """
+        body = self.tcp.dtype_cvt(digital_line, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(port, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(direction, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(polarity, 'uint32', 'bin')
+        header = self.tcp.header_construct('DigLines.PropsSet', len(body))
+        cmd = header + body
+        
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        
+        self.tcp.print_err(res_err)
+        if prt:
+            print(f'Configured digital line {digital_line} on port {port} with direction {direction} and polarity {polarity}.')
+        
+
+    def DigLines_OutStatusSet(self, port, digital_line, status, prt=True):
+        """
+        Sets the status of a digital output line.
+        
+        Args:
+            port (int): Digital port (0=Port A, 1=Port B, 2=Port C, 3=Port D).
+            digital_line (int): Output line to configure (1 to 8).
+            status (int): Output status (0=Inactive, 1=Active).
+            prt (bool, optional): If True, prints confirmation. Default is True.
+            
+        Returns:
+            str: Error message from response (if applicable).
+        """
+        body = self.tcp.dtype_cvt(port, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(digital_line, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(status, 'uint32', 'bin')
+        header = self.tcp.header_construct('DigLines.OutStatusSet', len(body))
+        cmd = header + body
+        
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        
+        self.tcp.print_err(res_err)
+        if prt:
+            print(f'Set status of digital line {digital_line} on port {port} to {"Active" if status else "Inactive"}.')
+
+    def DigLines_TTLValGet(self, port, prt= if_print):
+        """
+        Reads the actual TTL voltages present at the pins of the selected port.
+        
+        Args:
+            port (int): Digital port (0=Port A, 1=Port B, 2=Port C, 3=Port D).
+            prt (bool, optional): If True, prints the TTL values. Default is True.
+            
+        Returns:
+            tuple: (ttl_voltages_size, ttl_voltages, error_message) if response is True.
+        """
+        body = self.tcp.dtype_cvt(port, 'uint16', 'bin')
+        header = self.tcp.header_construct('DigLines.TTLValGet', len(body))
+        cmd = header + body
+        
+        self.tcp.cmd_send(cmd)
+        _, res_arg, res_err = self.tcp.res_recv('int', '1duint32')
+        
+        self.tcp.print_err(res_err)
+        ttl_voltages_size = res_arg[0]
+        ttl_voltages = res_arg[1].flatten()  # Flatten in case it comes as a 2D array
+        
+        if prt:
+            print(f'TTL voltages at port {port}: {ttl_voltages}')
+        
+        return ttl_voltages
+
+
+    
 ######################################## Data Logger Module #############################################
     def DataLogOpen(self, prt = if_print):
         header = self.tcp.header_construct('DataLog.Open', 0)

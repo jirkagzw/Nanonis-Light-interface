@@ -289,6 +289,32 @@ class andor_meas:
             print('\n' + response)
         
         return df
+    
+    def kinser_start(self, prt=if_print):
+        """
+        Starts the kinetic series and waits for the response.
+    
+        Raises:
+            ValueError: If the response "OK AQR" is not received.
+        
+        Returns:
+            pandas.DataFrame: A DataFrame with columns:
+                'Wavelength (nm)' (float) and 'Counts' (int).
+        """
+        header = 'AQR '
+        body = ""
+        cmd = header + body + self.tcp.termination_char
+    
+        self.tcp.cmd_send(cmd)
+        result = self.tcp.recv_until()
+    
+        elements = result.split()
+        response = " ".join(elements[:2])
+        expected_string = "OK AQR"
+        
+        if response != expected_string:
+            raise ValueError(f"Error: Expected '{expected_string}', but got '{response}'.")
+    
 
     def settings_get(self, prt=if_print):
         """

@@ -14,10 +14,19 @@ from datetime import datetime
 import sys
 import math
 from scipy.ndimage import median_filter
+import requests
+from queue import Queue
+from io import StringIO  # Import StringIO for in-memory text handling
+
 class photon_meas:
-    def __init__(self, connect,connect2): #connect2 = andor
+    def __init__(self, connect,connect2=None, connect3=None): #connect2 = andor
         self.connect = connect
         self.connect2=connect2
+        self.connect2=connect3
+        self.signal_names = self.connect.SignalsNamesGet() 
+        # Initialize URL placeholders
+        self.url_cal = None
+        self.kinser_dat = None
         return
     def clear_line(self):
         sys.stdout.write("\033[K") 
@@ -946,7 +955,7 @@ class photon_meas:
         return averages
 
     def save_params_connect_new(self,list_of_dfs, signal_names=None):
-        signal_names_df=self.connect.SignalsNamesGet()
+        signal_names_df=self.signal_names 
         # Handle default signal names
         if signal_names is None:
             signal_names = [
@@ -1033,7 +1042,7 @@ class photon_meas:
         self.connect2.acqtime_set(acqtime)
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
         settings=self.connect2.settings_get()
-        signal_names_df=self.connect.SignalsNamesGet()
+        signal_names_df=self.signal_names 
 
         sigvals = []
         data_dict = {}
@@ -1136,7 +1145,7 @@ class photon_meas:
     
     def spectrum_old(self, acqtime=10, acqnum=1, name="LS-man"):
         # Initialize variables
-        signal_names_df=self.connect.SignalsNamesGet()
+        signal_names_df=self.signal_names 
         df_deep_copy = signal_names_df.copy(deep=True)
         length=len(df_deep_copy)
         sigvals = []
@@ -1197,7 +1206,7 @@ class photon_meas:
         self.connect2.acqtime_set(acqtime)
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
         settings=self.connect2.settings_get()
-        signal_names_df=self.connect.SignalsNamesGet()
+        signal_names_df=self.signal_names 
         relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
         
         nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
@@ -1326,7 +1335,7 @@ class photon_meas:
             raise ValueError("Invalid direction. Use 'up', 'down', True, False, 0, or 1.")   
         start_time_scan = time.perf_counter()
         folder = self.connect.UtilSessionPathGet().loc['Session path', 0]
-        signal_names_df = self.connect.SignalsNamesGet()
+        signal_names_df = self.signal_names 
         SF = self.connect.ScanFrameGet()  # Retrieve scan frame
         settings=self.connect2.settings_get()
         if dim is None: 
@@ -1580,6 +1589,7 @@ Channels=Counts
                 "ACQ_TIME": str(elapsed_time_scan),
                 "SCAN_PIXELS": f"{pix[0]}\t{pix[1]}",
                 "SCAN_FILE": filename_sxm,
+                "SCAN_TIME": f"{acqtime*pix[0]:.6E}\t{acqtime*pix[0]:.6E}",
                 "SCAN_RANGE": f"{1e-9 * dim[0]:.6E}\t{1e-9 * dim[1]:.6E}",
                 "SCAN_OFFSET": f"{cx:.6E}\t{cy:.6E}",
                 "SCAN_ANGLE": str(angle),
@@ -1635,7 +1645,7 @@ Channels=Counts
             raise ValueError("Invalid direction. Use 'up', 'down', True, False, 0, or 1.")   
         start_time_scan = time.perf_counter()
         folder = self.connect.UtilSessionPathGet().loc['Session path', 0]
-        signal_names_df = self.connect.SignalsNamesGet()
+        signal_names_df = self.signal_names 
         SF = self.connect.ScanFrameGet()  # Retrieve scan frame
         
         settings=self.connect2.settings_get()
@@ -1876,7 +1886,6 @@ Channels=Counts
             elapsed_time_scan="{:.1f}".format(end_time_scan-start_time_scan)
             filename_sxm = self.connect.get_next_filename("M"+name,extension='.sxm',folder=folder)
             
-            nanonis_const= dict(zip(combined_df.T.iloc[0], combined_df.T.iloc[1].astype(str)))
             settings_dict=(dict(zip(settings.T.iloc[0], settings.T.iloc[1].astype(str))))
             scan_par = {
                 "REC_DATE": datetime.now().strftime('%d.%m.%Y'),
@@ -1884,6 +1893,7 @@ Channels=Counts
                 "ACQ_TIME": str(elapsed_time_scan),
                 "SCAN_PIXELS": f"{pix[0]}\t{pix[1]}",
                 "SCAN_FILE": filename_sxm,
+                "SCAN_TIME": f"{acqtime*pix[0]:.6E}\t{acqtime*pix[0]:.6E}",
                 "SCAN_RANGE": f"{1e-9 * dim[0]:.6E}\t{1e-9 * dim[1]:.6E}",
                 "SCAN_OFFSET": f"{cx:.6E}\t{cy:.6E}",
                 "SCAN_ANGLE": str(angle),
@@ -1893,9 +1903,9 @@ Channels=Counts
             andor_chan_names= data.iloc[:, 0].values.tolist()
             nanonis_chan_names=filtered_sigvals_df['Column1'].tolist()
             
-            nanononis_data_to_sxm=np.array(sigval_ar).T
+            nanonis_data_to_sxm=np.array(sigval_ar).T
             andor_data_to_sxm=np.array(data_ar).T
-            combined_data = np.vstack((nanononis_data_to_sxm, andor_data_to_sxm))
+            combined_data = np.vstack((nanonis_data_to_sxm, andor_data_to_sxm))
             
                         # Define constants
             scan_dir = 'both'
@@ -2005,7 +2015,7 @@ Channels=Counts
         SF = self.connect.ScanFrameGet()
         dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
         cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
-        signal_names_df=self.connect.SignalsNamesGet()
+        signal_names_df=self.signal_names 
         relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
         
         # Initial setup for the first point in the bottom-left corner
@@ -2062,7 +2072,7 @@ Channels=Counts
             stacked_data = np.stack([df.iloc[:, 1].values for df in signal_values])
             
 
-            signal_array[index]=bin_average_stacked(stacked_data,pix[0])
+            signal_array[index]=bin_average_stacked(stacked_data,pix[1])
             #signal_array[index]=bin_average_stacked(stacked_data,pix[0])
             time4 = time.perf_counter()
             print(len(signal_values), "{:.5f}".format(time4-time3),"{:.5f}".format(time3-time2),"{:.5f}".format(time2-time1))
@@ -2072,7 +2082,801 @@ Channels=Counts
         #return(np.stack(signal_array,axis=0))
         return(signal_array)
 
+
+    def zig_zag_move_acq_folme(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):       
+        def bin_average_stacked(array, n):
+            m = array.shape[0]  # Number of rows (measurements)
+            bin_size = m / n
+            result = np.empty((n, array.shape[1]))
+            print(m,bin_size,n)
             
+            for i in range(n):
+                start = int(i * bin_size)
+                end = int((i + 1) * bin_size)
+                result[i,:] = np.mean(array[start:end,:], axis=0)
+            return result
+
+        # Retrieve scan frame and set default dimensions if not provided
+        SF = self.connect.ScanFrameGet()
+        dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        
+        signals_slots=self.connect.SignalsInSlotsGet(prt=False)
+
+        if signal_names is None:
+            signal_names = [
+                "Bias (V)", "X (m)", "Y (m)", "Z (m)", "Current (A)", 
+                "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
+            ]
+        # Filter rows in `signals_slots` where the first column matches any item in `signal_names`
+
+        signals =signals_slots.iloc[:, 0].tolist()
+        matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
+        unmatched_items = [item for item in signal_names if item not in signals]
+        
+        scan_buffer=self.connect.ScanBufferGet()
+        num_chs, ch_idx, pxs, lines = scan_buffer.iloc[:, 0]
+        self.connect.ScanBufferSet(len(matching_indices),matching_indices,pxs, lines) 
+             
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2) if direction == "up" else (-dim[0] / 2, dim[1] / 2)
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+        # Move to the first point
+        #print(f"Moving to initial start point (dx_nm: {initial_dx_nm}, dy_nm: {initial_dy_nm})")
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
+        
+        mv_spd=1e-9*(np.sqrt(dim[0]**2+(dim[1]/pix[1]/2)**2)/(acqtime*pix[0]))
+        num_points=pix[0]*20
+        spl_rate=20/acqtime
+        ovs=max(1, min(2E4/spl_rate, 1000))
+        num_points=2E4/ovs*acqtime*pix[0]+200 # 200 margin
+        self.connect.FolMeOversamplSet(ovs,prt=False)
+        self.connect.TipRecBufferSizeSet(num_points,prt=False)
+        self.connect.FolMeSpeedSet(mv_spd,1)
+        
+        # Set scan direction parameters
+        row_range = range(2 * pix[1])# if direction == "up" else range(2 * pix[1] - 1, -1, -1)
+        dy_sign = -1 if direction == "up" else 1
+        
+        # Create the signal_array with NaN values
+        #signal_array = np.empty(len(row_range), dtype=object)
+        signal_array=np.full((len(row_range),pix[1],len(matching_indices)), np.nan, dtype=np.float32)
+        print(signal_array.shape)
+        s_time=time.perf_counter()
+        # Start zigzag pattern)
+        for index, row in enumerate(row_range):
+        # You can now use 'index' to access signal_array
+
+            # Calculate y-coordinate for the current row
+            dy_nm = (dy_sign * dim[1] / 2) + (row + 1) * (dim[1] / pix[1]) / 2 * (-dy_sign)
+        
+            # Determine end x-coordinate based on row direction
+            end_dx_nm = dim[0] / 2 if row % 2 == 0 else -dim[0] / 2
+        
+            # Rotate the end coordinates and move to the end point of the current row
+            end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+           # print(f"{direction.capitalize()}ward scan - Moving to end point (dx_nm: {end_dx_nm}, dy_nm: {dy_nm})")
+            time1 = time.perf_counter()
+            # Start move and wait for completion
+            self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True)
+            time2 = time.perf_counter()
+            chan,data=self.connect.TipRecDataGet()
+            self.connect.TipRecBufferClear()           
+            time3 = time.perf_counter()
+            signal_array[index]=bin_average_stacked(np.transpose(data),pix[1])
+            #signal_array[index]=bin_average_stacked(stacked_data,pix[0])
+            time4 = time.perf_counter()
+            print( "{:.5f}".format(time4-time3),"{:.5f}".format(time3-time2),"{:.5f}".format(time2-time1))
+        e_time=time.perf_counter()
+        print("tot time", "{:.5f}".format(e_time-s_time))
+        
+        self.connect.FolMeSpeedSet(mv_spd,0)
+        self.connect.ScanBufferSet(*scan_buffer.iloc[:, 0].values)
+        #return(np.stack(signal_array,axis=0))
+        return(signal_array)
+            
+    
+    def fwbw_move_acq_folme(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):       
+        def bin_average_stacked(array, n):
+            m = array.shape[1]  # Number of rows (measurements)
+            bin_size = m / n
+            result = np.empty((n, array.shape[0]))
+            
+            for i in range(n):
+                start = int(i * bin_size)
+                end = int((i + 1) * bin_size)
+                result[i,:] = np.mean(array[:,start:end], axis=1)
+            return result
+        
+        def calculate_parameters(acqtime, pix, backward=True):
+            # Initial calculation of sampling rate and ovs
+            spl_rate = 20 / acqtime
+            ovs = int(min(max(int(20000 / spl_rate), 2), 30))  # Ensure ovs is within the range [2, 30]
+
+            # Calculate num_points based on the current ovs
+            num_points = (2 * (20000 / ovs * acqtime * pix[0]) + 20) if backward else (20000 / ovs * acqtime * pix[0] + 20)
+
+            # Adjust ovs if num_points exceeds 200,000
+            while num_points >= 200000 and ovs < 300:
+                ovs += 1
+                num_points = int((2 * (20000 / ovs * acqtime * pix[0]) + 20) if backward else (20000 / ovs * acqtime * pix[0] + 20))+1
+                print(ovs)
+
+            # Final check to ensure num_points constraint is met
+            if num_points >= 200000:
+                print("Warning: Cannot satisfy num_points < 200000 even with adjusted ovs. Use map with single points.")
+            
+            return num_points / pix[0], int(ovs), num_points
+        
+        # Retrieve scan frame and set default dimensions if not provided
+        SF = self.connect.ScanFrameGet()
+        dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        bw_ratio=10
+        signals_slots=self.connect.SignalsInSlotsGet(prt=False)
+
+        if signal_names is None:
+            signal_names = [
+                "Bias (V)", "X (m)", "Y (m)", "Z (m)", "Current (A)", 
+                "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
+            ]
+        # Filter rows in `signals_slots` where the first column matches any item in `signal_names`
+
+        signals =signals_slots.iloc[:, 0].tolist()
+        matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
+        matching_items = [item for item in signal_names if item in signals]
+        unmatched_items = [item for item in signal_names if item not in signals]
+        print(f'Signals {unmatched_items} not in slots')
+        print(f'Signals {matching_items} in slots')
+        
+        scan_buffer=self.connect.ScanBufferGet()
+        num_chs, ch_idx, pxs, lines = scan_buffer.iloc[:, 0]
+        self.connect.ScanBufferSet(len(matching_indices),matching_indices,pxs, lines) 
+             
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2 + (dim[1] / pix[1])/2) if direction == "up" else (-dim[0] / 2, dim[1] / 2 - (dim[1] / pix[1])/2)
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+        # Move to the first point
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
+        
+        mv_spd=1e-9*(dim[0]/(acqtime*pix[0]))
+        #num_points=pix[0]*20
+       # spl_rate=20/acqtime
+       # ovs=max(3, min(2E4/spl_rate, 60))
+        #num_points = (2E4 / ovs * acqtime * pix[0] + 200) if not backward else (2 * (2E4 / ovs * acqtime * pix[0]) + 200) # 200 margin
+        
+        pppix, ovs, num_points = calculate_parameters(acqtime, pix, backward)
+        self.connect.FolMeOversamplSet(ovs,prt=False)
+        self.connect.TipRecBufferSizeSet(num_points,prt=False)
+        self.connect.TipRecBufferClear()
+        self.connect.FolMeSpeedSet(mv_spd,1)
+        
+        # Set scan direction parameters
+        row_range = range(2 * pix[1])
+        dy_sign = -1 if direction == "up" else 1
+        dy_plus=0
+        
+        # Create the signal_array with NaN values
+        signal_array=np.full((pix[0],len(row_range),len(matching_indices)), np.nan, dtype=np.float32)
+        print(signal_array.shape)
+        s_time=time.perf_counter()
+        # Start zigzag pattern)
+        for index, row in enumerate(row_range):
+        # You can now use 'index' to access signal_array
+
+            # Calculate y-coordinate for the current row
+            if row % 2 == 0 and row!=0:
+                dy_plus+=(dim[1] / pix[1]) * (-dy_sign)
+                
+            dy_nm=initial_dy_nm+dy_plus
+        
+            # Determine end x-coordinate based on row direction
+            end_dx_nm = dim[0] / 2 if row % 2 == 0 else -dim[0] / 2
+        
+            # Rotate the end coordinates and move to the end point of the current row
+            end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+
+            # Start move and wait for completion
+            
+            if backward==False:
+                if row % 2 == 0 and row!=0: 
+                    dx_n_rot,dy_n_rot=self.rotate(-end_dx_nm,dy_nm, angle)
+                    self.connect.FolMeXYPosSet(cx + dx_n_rot, cy + dy_n_rot, True) # move one pixel up after finishing fw bw line
+                    self.connect.FolMeSpeedSet(mv_spd,1)
+                    self.connect.TipRecBufferClear()
+                    
+                self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True)  #regular scan move
+    
+                if row % 2 == 0:
+                    _,data=self.connect.TipRecDataGet()   # save data containing only fw 
+                    temp_data = bin_average_stacked(data, pix[0]) # analyse to fw and bw movement and make avarage of pixels
+                    print(data.shape,temp_data.shape,index,index+1)
+                    signal_array[:,index,:], signal_array[:,index + 1,:] = temp_data, temp_data[::-1,:] # write first fw an later fw reversed
+                    self.connect.FolMeSpeedSet(bw_ratio*mv_spd,1)
+                
+                
+            else:
+                if row % 2 == 0 and row!=0:
+                    dx_n_rot,dy_n_rot=self.rotate(-end_dx_nm,dy_nm, angle)
+                    self.connect.FolMeXYPosSet(cx + dx_n_rot, cy + dy_n_rot, True) # move one pixel up after finishing fw bw line
+                    self.connect.TipRecBufferClear()
+                    
+                self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True) #regular scan move
+    
+                if row % 2 == 1:
+                    _,data=self.connect.TipRecDataGet()   # save data containing fw and bw
+                    temp_data = bin_average_stacked(data, 2 * pix[0]) # analyse to fw and bw movement and make avarage of pixels
+                    print(data.shape,temp_data[:pix[0], :].shape,temp_data[pix[0]:, :].shape,index-1,index)
+                    signal_array[:,index - 1,:], signal_array[:,index,:] = temp_data[:pix[0], :], temp_data[pix[0]:, :] # write first fw an later bw
+           # print("loop time", "{:.5f}".format((time.perf_counter()-s_time)/(index+1)),"theoretic loop time","{:.5f}".format(acqtime*pix[0]) )
+        e_time=time.perf_counter()
+        print("tot time", "{:.5f}".format(e_time-s_time))
+        
+        self.connect.FolMeSpeedSet(mv_spd,0)
+        self.connect.ScanBufferSet(*scan_buffer.iloc[:, 0].values)
+        #return(np.stack(signal_array,axis=0))
+        return(signal_array)
+    
+    
+    def bin_average_stacked(self,array, n):
+        m = array.shape[1]  # Number of rows (measurements)
+        bin_size = m / n
+        result = np.empty((n, array.shape[0]))
+        
+        for i in range(n):
+            start = int(i * bin_size)
+            end = int((i + 1) * bin_size)
+            result[i,:] = np.mean(array[:,start:end], axis=1)
+        return result
+    
+    def calculate_parameters(self,acqtime, pix, backward=True):
+        # Initial calculation of sampling rate and ovs
+        spl_rate = 20 / acqtime
+        ovs = int(min(max(int(20000 / spl_rate), 2), 30))  # Ensure ovs is within the range [2, 30]
+
+        # Calculate num_points based on the current ovs
+        num_points = (2 * (20000 / ovs * acqtime * pix[0]) + 20) if backward else (20000 / ovs * acqtime * pix[0] + 20)
+
+        # Adjust ovs if num_points exceeds 200,000
+        while num_points >= 200000 and ovs < 300:
+            ovs += 1
+            num_points = int((2 * (20000 / ovs * acqtime * pix[0]) + 20) if backward else (20000 / ovs * acqtime * pix[0] + 20))+1
+            print(ovs)
+
+        # Final check to ensure num_points constraint is met
+        if num_points >= 200000:
+            print("Warning: Cannot satisfy num_points < 200000 even with adjusted ovs. Use map with single points.")
+        
+        return num_points / pix[0], int(ovs), num_points
+    
+    def fetch_data_from_queue_v2(self, fetch_queue: Queue, delta: float, n: int):
+        """
+        Fetches data from an external source and processes it.
+    
+        Args:
+            fetch_queue (Queue): Queue to receive notifications for fetching data.
+            delta (float): Time delay between each fetch.
+            n (int): Desired number of rows for reshaping the data.
+    
+        """
+        port = str(self.connect2.tcp.server_addr[1])
+        path = "/shm/andor.dat"
+        address = self.connect2.tcp.server_addr[0]
+        
+        # Construct the URL
+        url = f"http://{address}:{port}{path}"
+    
+        while True:
+            # Wait for a notification to fetch data
+            item = fetch_queue.get()  # Block until there's a new item in the queue
+            if item is None:  # Check for shutdown signal
+                break
+    
+            # Wait for the specified delta time
+            time.sleep(delta)
+    
+            try:
+                # Send an HTTP GET request to fetch the data file
+                response = requests.get(url)
+    
+                # Check if the request was successful
+                if response.status_code == 200:
+                    # Use np.fromstring to convert the entire response text into an array of floats
+                    data_array = np.fromstring(response.text, sep='\n', dtype=float)
+    
+                    # Ensure the data array length matches the expected shape
+                    m = data_array.size // n
+                    if data_array.size != n * m:
+                        print("Warning: The data length is not divisible by the specified rows.")
+                        data_array = data_array[:n * m]  # Trim any extra values if needed
+    
+                    # Reshape the data array
+                    data_array = data_array.reshape((n, m))
+    
+                    # Further processing of data_array can be done here
+                    print("Data fetched and reshaped successfully.")
+                    print(data_array)
+    
+                else:
+                    print(f"Failed to fetch data. Status code: {response.status_code}")
+            
+            except Exception as e:
+                print(f"An error occurred: {e}")
+            
+            finally:
+                fetch_queue.task_done()  # Mark the task as done
+                
+    def andor_thread_open(self,port=2,index=0,wait_time=None):
+        andor_thread=threading.Thread(target=self.connect2.kinser_start)
+        andor_thread.start()
+        if wait_time==None:
+           while True:
+               if self.connect.DigLines_TTLValGet(port=port)[index] == 0: # low or high input
+                   break
+        else:
+            time.sleep(wait_time)
+        return(andor_thread)
+    
+    def build_urls(self):
+        # Only build URLs for kinetic series when needed
+        TCP_IP, PORT = self.connect2.tcp.server_addr
+        PORT=1234
+        self.url_cal = f"http://{TCP_IP}:{PORT}/shm/andor.cal"
+        self.kinser_dat = f"http://{TCP_IP}:{PORT}/shm/andor.dat"
+
+    def get_cal(self): #maybe move to andor_meas later
+        if self.url_cal is None or self.kinser_dat is None:
+            self.build_urls()
+        try:
+            response = requests.get(self.url_cal)  # Send GET request to URL
+            if response.status_code == 200:  # Check if request is successful
+                data = response.text  # Get the response text
+                split_index = data.rfind("\n\n") + 1  # Find the last empty line to split data
+                cal = np.genfromtxt(StringIO(data[:split_index]), dtype=float, invalid_raise=False)  # Load numeric data into NumPy array
+                return cal, len(cal)  # Return data and pixel count
+            print(f"Failed: {response.status_code}")  # Print error if request failed
+        except Exception as e:  # Catch any exceptions
+            print(f"Error: {e}")  # Print exception error
+            return None, None  # Return None if an error occurred
+        
+    def read_kinser(self,n): #maybe move to andor_meas later
+        """Fetch data, reshape it to 1024 x n, and return."""
+        try:
+            response = requests.get(self.kinser_dat)  # Fetch data
+            if response.status_code != 200: raise ValueError(f"Error: {response.status_code}")
+            
+            data = np.loadtxt(StringIO(response.text))  # Load data
+            if data.size % n != 0: raise ValueError("Invalid data size")
+            
+            return data.reshape(data.size // n, n)  # Reshape and return
+        except Exception as e:
+            raise RuntimeError(f"An error occurred: {e}")  # Error handling
+            
+    def fetch_data_from_queue(self, backward,cal,fetch_queue: Queue, delta: float, andor_array: np.ndarray):
+        """
+        Fetches data from an external source and processes it.
+    
+        Args:
+            fetch_queue (Queue): Queue to receive notifications for fetching data.
+            delta (float): Time delay between each fetch.
+            n (int): Desired number of rows for reshaping the data.
+    
+        """
+        if self.url_cal is None or self.kinser_dat is None:
+            self.build_urls()
+        i=0
+        while True:
+            # Wait for a notification to fetch data
+            item = fetch_queue.get()  # Block until there's a new item in the queue
+            if item is None:  # Check for shutdown signal
+                break
+    
+            # Wait for the specified delta time
+            time.sleep(delta)
+            
+            if i==0:
+                calib,n=self.get_cal() # get calibration
+                cal.append(calib.tolist())
+            
+            try:
+                #print(self.kinser_dat)
+                response = requests.get(self.kinser_dat)  # Fetch data
+                if response.status_code != 200: raise ValueError(f"Error: {response.status_code}")
+                
+                data = np.loadtxt(StringIO(response.text))  # Load data
+                if data.size % n != 0: raise ValueError("Invalid data size")
+                
+                if backward:  # Case for backward==True
+                    # Split the data into two halves
+                    half_size = data.size // 2
+                    andor_array[2*i, :, :] = data[:half_size].reshape(half_size // n, n)  # First half
+                    andor_array[2*i+1, :, :] = data[half_size:].reshape(half_size // n, n)  # Second half
+                else:  # Case for backward==False
+                    andor_array[i, :, :] = data.reshape(data.size // n, n)  # Reshape and assign
+              #  andor_array[i,:,:] = data.reshape(data.size // n, n)  # Reshape and return
+               # print()
+                #print(i,"index",data.shape)
+                
+            except Exception as e:
+                raise RuntimeError(f"An error occurred: {e}")  # Error handling
+                
+            finally:
+                fetch_queue.task_done()  # Mark the task as done
+                i+=1
+    
+    def photon_map_k(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,direction="up",backward=False,bw_ratio=10,readmode=0,wait_time=None):       
+        s_time=time.perf_counter()
+        bw_fact = 2 if backward else 1
+        #first try communication with andor
+        try:
+            self.connect2.acqtime_set(acqtime)
+            settings=self.connect2.settings_get()
+            andor=True
+            for index, row in settings.iterrows():
+                code = row['Code']
+                value = row['Value']
+                if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"]):
+                    print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
+                    self.connect2.readmode_set(readmode)
+                elif code == 'GAM' and value != 3:
+                    print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
+                    self.connect2.acqmode_set(3)
+                elif code == 'GKT':
+                    acqtime=float(value)
+            
+            self.connect2.tcp.cmd_send(f"SKN {pix[0]*bw_fact}") #make it a function
+            response_and = self.connect2.tcp.recv_until() 
+            self.connect2.tcp.cmd_send("AQP")
+            response_and = self.connect2.tcp.recv_until()
+            settings=self.connect2.settings_get()
+        except Exception as e:
+            #raise RuntimeError(f"An error occurred: {e}")  # Error handling
+            print(e)
+            andor=False
+        print("andor",andor)
+        # Retrieve scan frame and set default dimensions if not provided
+        SF = self.connect.ScanFrameGet()
+        dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        signals_slots=self.connect.SignalsInSlotsGet(prt=False)
+
+        if signal_names is None:
+            signal_names = [
+                "Bias (V)", "Z (m)", "Current (A)", 
+                "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
+            ]
+        # Filter rows in `signals_slots` where the first column matches any item in `signal_names`
+
+        signals =signals_slots.iloc[:, 0].tolist()
+        # Get matching indices and signals in the order based on signals
+        matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
+        matching_signals = [signals[i] for i in matching_indices]
+        
+        # Get unmatched items
+        unmatched_items = [item for item in signal_names if item not in signals]
+        print(f'Signals {unmatched_items} not in slots')
+        # define the channels recorded
+        scan_buffer=self.connect.ScanBufferGet()
+        num_chs, ch_idx, pxs, lines = scan_buffer.iloc[:, 0]
+        self.connect.ScanBufferSet(len(matching_indices),matching_indices,pxs, lines) 
+             
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2 + (dim[1] / pix[1])/2) if direction == "up" else (-dim[0] / 2, dim[1] / 2 - (dim[1] / pix[1])/2)
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+                
+        #prepare Andor, set acqtime anf get acqtime, set it for range(2 * pix[1]) or range pix[1] accumulations
+        
+        # Move to the first point
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
+        # set bw and fw move speed 
+        mv_spd=1e-9*(dim[0]/(acqtime*pix[0]))
+        bw_ratio=(min(bw_ratio, 100*1e-9/mv_spd)) #limit bw_spped to max 100 nm/s
+        # define the Tip Rec parameters 
+        pppix, ovs, num_points = self.calculate_parameters(acqtime, pix, backward)
+        self.connect.FolMeOversamplSet(ovs,prt=False)
+        self.connect.TipRecBufferSizeSet(num_points,prt=False)
+        self.connect.TipRecBufferClear()
+        self.connect.FolMeSpeedSet(mv_spd,1)
+        
+        # Set scan direction parameters
+        row_range = range(2 * pix[1])
+        dy_sign = -1 if direction == "up" else 1
+        dy_plus=0
+        
+        # Create the signal_array with NaN values
+        signal_array=np.full((len(row_range),pix[0],len(matching_indices)), np.nan, dtype=np.float32)
+
+        # Start zigzag pattern)
+        g1_time,g2_time=0,0
+
+        
+        # .3ds header creation
+        folder = self.connect.UtilSessionPathGet().loc['Session path', 0]
+        filename_3ds = self.connect.get_next_filename("G"+name, extension='.3ds', folder=folder)
+    
+        bias_voltage = self.connect.BiasGet().iloc[0, 0]  # Bias (V) as float
+        grid_settings = np.array([cx,cy,1e-9*dim[0],1e-9*dim[1],angle])  # Grid settings as np.array
+        sweep_signal = "Wavelength (nm)"  # Sweep signal as string
+        count_write=0
+        
+        # Prepare the header
+        start_time = datetime.now().strftime('%d.%m.%Y %H:%M:%S.%f')[:-3]
+        header = f'''End time="{start_time}"
+Start time="{start_time}"
+Delay before measuring (s)=0
+Comment=
+Bias (V)={bias_voltage:.6E}
+Experiment=Experiment
+Date="{start_time.split()[0]}"
+User=
+Grid dim="{pix[0]} x {pix[1]}"
+Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
+
+'''
+        if backward==True:
+            filename_3ds_bw = self.connect.get_next_filename("G"+name+'_bw', extension='.3ds', folder=folder)
+          ###  f_bw = open(filename_3ds_bw, 'wb')
+          ###  f_bw.write(header.encode())
+
+      ###  f = open(filename_3ds, 'wb')
+      ###  f.write(header.encode())
+        if andor:
+            cal=[]
+            andor_array = np.full((bw_fact*pix[1], pix[0], 1024), np.nan, dtype=np.float32)
+            #start andor queue for data downloading and processing
+            fetch_queue = Queue()  # Create a queue for URLs to fetch
+            delta = 0.05  # Set your desired delay time
+            fetch_thread = threading.Thread(target=self.fetch_data_from_queue, args=(backward,cal,fetch_queue, delta,andor_array))
+            fetch_thread.start()  # Start the fetch thread
+        
+
+        try:
+            counter=0
+            for index, row in enumerate(row_range):                    
+            # You can now use 'index' to access signal_array
+                # Calculate y-coordinate for the current row
+                if row % 2 == 0 and row!=0:
+                    dy_plus+=(dim[1] / pix[1]) * (-dy_sign)
+                    
+                dy_nm=initial_dy_nm+dy_plus
+            
+                # Determine end x-coordinate based on row direction
+                end_dx_nm = dim[0] / 2 if row % 2 == 0 else -dim[0] / 2
+            
+                # Rotate the end coordinates and move to the end point of the current row
+                end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+    
+                # Start move and wait for completion
+                
+                if backward==False:
+                    if andor==True and row ==0:   #for row 0 start the acquisition; starts andor kinetic series acquisition and waits for TTL pulse from andor
+                        andor_thread=self.andor_thread_open(wait_time=wait_time)
+
+                    if row % 2 == 0 and row!=0: 
+                        dx_n_rot,dy_n_rot=self.rotate(-end_dx_nm,dy_nm, angle)
+                        self.connect.FolMeXYPosSet(cx + dx_n_rot, cy + dy_n_rot, True) # move one pixel up after finishing fw bw line
+                        self.connect.FolMeSpeedSet(mv_spd,1)
+                        self.connect.TipRecBufferClear()
+                        
+                        if andor:
+                            andor_thread.join()  # for all beginnings of new lines, finish the old one and start the new acquisition
+                            fetch_queue.put("start")
+                            andor_thread=self.andor_thread_open(wait_time=wait_time)
+                        
+                    self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True)  #regular scan move
+        
+                    if row % 2 == 0:
+                        _,data=self.connect.TipRecDataGet()   # save data containing only fw 
+                        temp_data = self.bin_average_stacked(data,pix[0]) # analyse to fw and bw movement and make avarage of pixels
+                        signal_array[index,:,:], signal_array[index + 1,:,:] = temp_data, temp_data[::-1,:] # write first fw an later fw reversed
+                        self.connect.FolMeSpeedSet(bw_ratio*mv_spd,1)
+                        
+                    if index == len(row_range) - 1 and andor==True: #Terminate in last row
+                        andor_thread.join()
+                        fetch_queue.put("start")
+                    
+                else:
+                    
+                    if andor==True and row ==0:   #for row 0 start the acquisition; starts andor kinetic series acquisition and waits for TTL pulse from andor
+                        andor_thread=self.andor_thread_open(wait_time=wait_time)
+                            
+                    if row % 2 == 0 and row!=0:
+                        dx_n_rot,dy_n_rot=self.rotate(-end_dx_nm,dy_nm, angle)
+                        self.connect.FolMeXYPosSet(cx + dx_n_rot, cy + dy_n_rot, True) # move one pixel up after finishing fw bw line
+                        self.connect.TipRecBufferClear()
+                        if andor:
+                            andor_thread.join()  # for all beginnings of new lines, finish the old one and start the new acquisition
+                            fetch_queue.put("start")
+                            andor_thread=self.andor_thread_open(wait_time=wait_time)
+                        
+                    self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True) #regular scan move
+        
+                    if row % 2 == 1:
+                        _,data=self.connect.TipRecDataGet()   # save data containing fw and bw
+                        temp_data = self.bin_average_stacked(data,2 * pix[0]) # analyse to fw and bw movement and make avarage of pixels
+                    #    print(data.shape,temp_data[pix[0]:, :].shape,index-1,index)
+                        signal_array[index - 1,:,:], signal_array[index,:,:] = temp_data[:pix[0], :], temp_data[pix[0]:, :] # write first fw an later bw
+                        
+                    if index == len(row_range) - 1 and andor==True: #Terminate in last row
+                        andor_thread.join()
+                        fetch_queue.put("start")
+                counter+=pix[0]        
+                elapsed = time.perf_counter() - s_time
+                remaining = (elapsed / counter) * (math.prod(pix)*2 - counter)
+                sys.stdout.write(f"\rExecuted {int(counter*bw_fact/2)}/{math.prod(pix)*bw_fact} | Remaining: {int(remaining // 60):02d}:{int(remaining % 60):02d}") #(column+1+pix[0]*row)*
+                sys.stdout.flush()
+             #   print("loop time", "{:.5f}".format((time.perf_counter()-sl_time-g2_time+g1_time)),"theoretic loop time","{:.5f}".format(acqtime*pix[0]))
+                      
+        except KeyboardInterrupt:
+            pass
+            
+        finally:
+            if andor:
+                # Ensure all remaining items in the queue are processed
+                fetch_queue.join()  # Wait until all items in the queue have been processed
+                fetch_queue.put(None)  # Send a shutdown signal to the fetch thread
+                fetch_thread.join()  # Wait for the fetch thread to finish
+              #  print("Shutdown complete.")
+            
+            end_time_scan = time.perf_counter()
+            elapsed_time_scan="{:.1f}".format(end_time_scan-s_time)
+           ### f.close()
+            if backward==True:
+                pass
+             ###   f_bw.close()
+            filename_sxm = self.connect.get_next_filename("M"+name,extension='.sxm',folder=folder)
+           ### settings_dict=(dict(zip(settings.T.iloc[0], settings.T.iloc[1].astype(str))))
+            scan_par = {
+                "REC_DATE": datetime.now().strftime('%d.%m.%Y'),
+                "REC_TIME":  datetime.now().strftime('%H:%M:%S'),
+                "ACQ_TIME": str(elapsed_time_scan),
+                "SCAN_PIXELS": f"{pix[0]}\t{pix[1]}",
+                "SCAN_FILE": filename_sxm,
+                "SCAN_TIME": f"{acqtime*pix[0]:.6E}\t{acqtime*pix[0]:.6E}",
+                "SCAN_RANGE": f"{1e-9 * dim[0]:.6E}\t{1e-9 * dim[1]:.6E}",
+                "SCAN_OFFSET": f"{cx:.6E}\t{cy:.6E}",
+                "SCAN_ANGLE": str(angle),
+                "SCAN_DIR": direction,
+                "BIAS": str(bias_voltage)
+                }   
+            andor_chan_names= []
+            settings_dict={}
+            nanonis_chan_names=matching_signals
+            if andor:
+                #print(cal,"calibration")
+                andor_chan_names=[item for sublist in cal for item in sublist]
+                
+            
+            #andor_data_to_sxm=np.array(data_ar).T
+            #combined_data = np.vstack((nanonis_data_to_sxm, andor_data_to_sxm))
+            if andor:
+                if backward==True:
+                    combined_data =np.vstack((signal_array.transpose(2, 0, 1).reshape(signal_array.shape[2], -1),andor_array.transpose(2, 0, 1).reshape(andor_array.shape[2], -1)))
+                else:
+                    print(andor_array.shape,signal_array.shape)
+                    combined_data =np.vstack((signal_array[::2,:,:].transpose(2, 0, 1).reshape(signal_array.shape[2], -1),andor_array.transpose(2, 0, 1).reshape(andor_array.shape[2], -1)))
+            else:
+                if backward==True:
+                    combined_data =signal_array.transpose(2, 0, 1).reshape(signal_array.shape[2], -1)
+                else:
+                    combined_data =signal_array[::2,:,:].transpose(2, 0, 1).reshape(signal_array.shape[2], -1)
+            
+                        # Define constants
+            scan_dir = 'both'
+            default_value1 = '1.000E+0'
+            default_value2 = '0.000E+0'
+            
+            # Initialize lists to store the final output
+            final_list = []
+            
+            # Process nanonis_chan_names
+            for i, name in enumerate(nanonis_chan_names, start=1):
+                base_name, unit = name.split(' (')
+                unit = unit.strip(')')
+                final_list.append([i, f'{base_name}_avg.', unit, scan_dir, default_value1, default_value2])
+            
+            # Process andor_chan_names starting from index 128
+            #print(andor_chan_names)
+            #print(cal,"cal")
+            #print(nanonis_chan_names)
+            for i, name in enumerate(andor_chan_names, start=128):
+                final_list.append([i, name, 'nm', scan_dir, default_value1, default_value2])
+
+            data_sxm=self.connect.writesxm(backward,filename_sxm, settings_dict, scan_par, final_list, combined_data)
+            
+            
+
+        
+        # reset speed and recorded channels in scan window to the original value before the map acquisition
+        self.connect.FolMeSpeedSet(mv_spd,0)
+        self.connect.ScanBufferSet(*scan_buffer.iloc[:, 0].values)
+        #return(np.stack(signal_array,axis=0))
+        e_time=time.perf_counter()
+        print("tot time", "{:.5f}".format(e_time-s_time))
+        if andor:
+            return(signal_array,andor_array)
+        else:
+            return(signal_array)
+    
+    def fw_bw_map_chatGPT(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None, savedat=False, direction="up", backward=False, readmode=0):       
+        def bin_average_stacked(array, n):
+            """Average rows of an array in bins of size n."""
+            bin_size = array.shape[0] // n
+            return np.array([np.mean(array[i * bin_size:(i + 1) * bin_size], axis=0) for i in range(n)])
+        
+        # Retrieve scan frame and set default dimensions if not provided
+        SF = self.connect.ScanFrameGet()
+        dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        
+        # Get available signal slots and set signal names
+        signals_slots = self.connect.SignalsInSlotsGet(prt=False)
+        if signal_names is None:
+            signal_names = [
+                "Bias (V)", "X (m)", "Y (m)", "Z (m)", "Current (A)", 
+                "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
+            ]
+        
+        # Find matching indices of required signals
+        signals = signals_slots.iloc[:, 0].tolist()
+        matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
+    
+        # Set scan buffer and initialize settings
+        scan_buffer = self.connect.ScanBufferGet()
+        self.connect.ScanBufferSet(len(matching_indices), matching_indices, scan_buffer.iloc[:, 2], scan_buffer.iloc[:, 3]) 
+                  
+        # Initial setup for movement
+        initial_dy_nm = -dim[1] / 2 + (dim[1] / pix[1]) / 2 if direction == "up" else dim[1] / 2 - (dim[1] / pix[1]) / 2
+        initial_dx_rot, initial_dy_rot = self.rotate(-dim[0] / 2, initial_dy_nm, angle)
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot, True)
+        
+        # Movement and acquisition setup
+        mv_spd = 1e-9 * (np.sqrt(dim[0]**2 + (dim[1] / pix[1] / 2)**2) / (acqtime * pix[0]))
+        ovs = max(1, min(2E4 / (20 / acqtime), 1000))
+        num_points = int(2E4 / ovs * acqtime * pix[0] + 200)
+        self.connect.FolMeOversamplSet(ovs, prt=False)
+        self.connect.TipRecBufferSizeSet(num_points, prt=False)
+        self.connect.TipRecBufferClear()
+        self.connect.FolMeSpeedSet(mv_spd, 1)
+        
+        # Initialize signal array for data storage
+        signal_array = np.full((2 * pix[1], pix[1], len(matching_indices)), np.nan, dtype=np.float32)
+        
+        # Zigzag scanning
+        s_time = time.perf_counter()
+        dy_sign = -1 if direction == "up" else 1
+        dy_plus = 0
+        for index, row in enumerate(range(2 * pix[1])):
+            # Update y-coordinate for new rows
+            if row % 2 == 0 and row != 0:
+                dy_plus += (dim[1] / pix[1]) * -dy_sign
+            
+            dy_nm = initial_dy_nm + dy_plus
+            end_dx_nm = dim[0] / 2 if row % 2 == 0 else -dim[0] / 2
+            end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+            
+            # Move to new row and record data
+            if row % 2 == 0 and row != 0:
+                dx_n_rot, dy_n_rot = self.rotate(-end_dx_nm, dy_nm, angle)
+                self.connect.FolMeXYPosSet(cx + dx_n_rot, cy + dy_n_rot, True)
+                self.connect.TipRecBufferClear()
+            
+            self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True)
+            if row % 2 == 1:
+                _, data = self.connect.TipRecDataGet()
+                temp_data = bin_average_stacked(np.transpose(data), 2 * pix[1])
+                signal_array[:,index - 1,:], signal_array[index] = temp_data[:pix[1], :], temp_data[pix[1]:, :][::-1, :]
+        
+        e_time = time.perf_counter()
+        print("Total time:", "{:.5f}".format(e_time - s_time))
+        
+        # Restore original settings and return data
+        self.connect.FolMeSpeedSet(mv_spd, 0)
+        self.connect.ScanBufferSet(*scan_buffer.iloc[:, 0].values)
+        return signal_array
     
     def zig_zag_move(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up",backward=False,readmode=0):       
        
@@ -2173,7 +2977,7 @@ Channels=Counts
             
         start_time_scan = time.perf_counter()
         folder = self.connect.UtilSessionPathGet().loc['Session path', 0]
-        signal_names_df = self.connect.SignalsNamesGet()
+        signal_names_df = self.signal_names
         SF = self.connect.ScanFrameGet()  # Retrieve scan frame
         if dim is None:
             dim=(1e9*SF.values[2][0],1e9*SF.values[3][0])
@@ -2320,6 +3124,7 @@ Channels=Integer
                 "ACQ_TIME": str(elapsed_time_scan),
                 "SCAN_PIXELS": f"{pix[0]}\t{pix[1]}",
                 "SCAN_FILE": filename_sxm,
+                "SCAN_TIME": f"{acqtime*pix[0]:.6E}\t{acqtime*pix[0]:.6E}",
                 "SCAN_RANGE": f"{1e-9 * dim[0]:.6E}\t{1e-9 * dim[1]:.6E}",
                 "SCAN_OFFSET": f"{cx:.6E}\t{cy:.6E}",
                 "SCAN_ANGLE": str(angle),
@@ -2345,6 +3150,7 @@ Channels=Integer
                 final_list.append([i, f'{base_name}_avg.', unit, scan_dir, default_value1, default_value2])
     
             nanonis_data = np.array(sigval_ar).T
+            print("shape",nanonis_data.shape)
     
             # Save the final data to an SXM file
             final_data=self.connect.writesxm(False,filename_sxm,settings_dict, scan_par, final_list, nanonis_data)
