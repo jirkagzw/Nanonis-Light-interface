@@ -22,7 +22,7 @@ class photon_meas:
     def __init__(self, connect,connect2=None, connect3=None): #connect2 = andor
         self.connect = connect
         self.connect2=connect2
-        self.connect2=connect3
+        self.connect3=connect3
         self.signal_names = self.connect.SignalsNamesGet() 
         # Initialize URL placeholders
         self.url_cal = None
