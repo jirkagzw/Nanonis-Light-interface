@@ -2109,10 +2109,7 @@ Channels=Counts
                 "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
             ]
         # Filter rows in `signals_slots` where the first column matches any item in `signal_names`
-        if self.connect.version<13000:
-            signals =signals_slots.iloc[:, 0].tolist()
-        else:
-            signals =self.signal_names.iloc[:, 0].tolist()
+        signals =signals_slots.iloc[:, 0].tolist()
         matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
         unmatched_items = [item for item in signal_names if item not in signals]
         
@@ -2542,7 +2539,6 @@ Channels=Counts
         SF = self.connect.ScanFrameGet()
         dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
         cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
-        signals_slots=self.connect.SignalsInSlotsGet(prt=False)
 
         if signal_names is None:
             signal_names = [
@@ -2551,7 +2547,11 @@ Channels=Counts
             ]
         # Filter rows in `signals_slots` where the first column matches any item in `signal_names`
 
-        signals =signals_slots.iloc[:, 0].tolist()
+        if self.connect.version<13000:
+            signals_slots=self.connect.SignalsInSlotsGet(prt=False)
+            signals =signals_slots.iloc[:, 0].tolist()
+        else:
+            signals =self.signal_names.iloc[:, 0].tolist()
         # Get matching indices and signals in the order based on signals
         matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
         matching_signals = [signals[i] for i in matching_indices]
