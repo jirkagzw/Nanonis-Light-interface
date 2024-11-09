@@ -2109,8 +2109,10 @@ Channels=Counts
                 "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
             ]
         # Filter rows in `signals_slots` where the first column matches any item in `signal_names`
-
-        signals =signals_slots.iloc[:, 0].tolist()
+        if self.connect.version<13000:
+            signals =signals_slots.iloc[:, 0].tolist()
+        else:
+            signals =self.signal_names.iloc[:, 0].tolist()
         matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
         unmatched_items = [item for item in signal_names if item not in signals]
         
@@ -2525,7 +2527,7 @@ Channels=Counts
                     self.connect2.acqmode_set(3)
                 elif code == 'GKT':
                     acqtime=float(value)
-            
+    
             self.connect2.tcp.cmd_send(f"SKN {pix[0]*bw_fact}") #make it a function
             response_and = self.connect2.tcp.recv_until() 
             self.connect2.tcp.cmd_send("AQP")
