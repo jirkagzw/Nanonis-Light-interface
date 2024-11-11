@@ -2453,7 +2453,7 @@ Channels=Counts
         except Exception as e:
             raise RuntimeError(f"An error occurred: {e}")  # Error handling
             
-    def fetch_data_from_queue(self, backward,cal,fetch_queue: Queue, delta: float, andor_array: np.ndarray):
+    def fetch_data_from_queue(self, backward,cal,file,matching_signals,signal_array,fetch_queue: Queue, delta: float, andor_array: np.ndarray):
         """
         Fetches data from an external source and processes it.
     
@@ -2466,6 +2466,7 @@ Channels=Counts
         if self.url_cal is None or self.kinser_dat is None:
             self.build_urls()
         i=0
+        bw_fact = 2 if backward else 1
         while True:
             # Wait for a notification to fetch data
             item = fetch_queue.get()  # Block until there's a new item in the queue
@@ -2478,6 +2479,23 @@ Channels=Counts
             if i==0:
                 calib,n=self.get_cal() # get calibration
                 cal.append(calib.tolist())
+                sweep_signal = "Wavelength (nm)"  # Sweep signal as string
+                fixed_parameters = ["Sweep Start", "Sweep End"]+matching_signals
+                            #print(fixed_parameters)
+                header2=f'''Sweep Signal="{sweep_signal}"
+Fixed parameters="{';'.join(fixed_parameters)}"
+Experiment parameters=
+# Parameters (4 byte)={len(fixed_parameters)}
+Experiment size (bytes)=4096
+Points={n}
+Channels=Counts
+'''
+                file.write(header2.encode())
+                andor_chan_names= calib.tolist()
+                chnames = [f"wl {i}=" + str(item) for i, item in enumerate(andor_chan_names)]
+                file.write(('\n'.join(chnames)+"\n").encode())
+                file.write((':HEADER_END:\n').encode())
+                
             
             try:
                 #print(self.kinser_dat)
@@ -2492,11 +2510,18 @@ Channels=Counts
                     half_size = data.size // 2
                     andor_array[2*i, :, :] = data[:half_size].reshape(half_size // n, n)  # First half
                     andor_array[2*i+1, :, :] = data[half_size:].reshape(half_size // n, n)  # Second half
-                else:  # Case for backward==False
+                    
+                else:  # Case for backward == False
                     andor_array[i, :, :] = data.reshape(data.size // n, n)  # Reshape and assign
-              #  andor_array[i,:,:] = data.reshape(data.size // n, n)  # Reshape and return
-               # print()
-                #print(i,"index",data.shape)
+                    
+                for j in range(signal_array.shape[1]):
+                    # Construct arrays of nanonis data (with start and end wavelength) and andor data 
+                    nanonis_data = np.array([float(calib[0]), float(calib[-1])] + list(signal_array[2*i, j, :]))
+                    andor_data = andor_array[bw_fact*i, j, :]
+                    
+                    # Convert to the correct dtype and write to file
+                    nanonis_data.astype(">f4").tofile(file)
+                    andor_data.astype(">f4").tofile(file)
                 
             except Exception as e:
                 raise RuntimeError(f"An error occurred: {e}")  # Error handling
@@ -2623,15 +2648,15 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
           ###  f_bw = open(filename_3ds_bw, 'wb')
           ###  f_bw.write(header.encode())
 
-      ###  f = open(filename_3ds, 'wb')
-      ###  f.write(header.encode())
+        f = open(filename_3ds, 'wb')
+        f.write(header.encode())
         if andor:
             cal=[]
             andor_array = np.full((bw_fact*pix[1], pix[0], 1024), np.nan, dtype=np.float32)
             #start andor queue for data downloading and processing
             fetch_queue = Queue()  # Create a queue for URLs to fetch
             delta = 0.05  # Set your desired delay time
-            fetch_thread = threading.Thread(target=self.fetch_data_from_queue, args=(backward,cal,fetch_queue, delta,andor_array))
+            fetch_thread = threading.Thread(target=self.fetch_data_from_queue, args=(backward,cal,f,matching_signals,signal_array,fetch_queue, delta,andor_array))
             fetch_thread.start()  # Start the fetch thread
         
 
@@ -2725,7 +2750,15 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
             
             end_time_scan = time.perf_counter()
             elapsed_time_scan="{:.1f}".format(end_time_scan-s_time)
-           ### f.close()
+            
+            end_time = datetime.now().strftime('%d.%m.%Y %H:%M:%S.%f')[:-3]
+            end_time_line = f'End time="{end_time}" \n'
+            end_time_line = end_time_line.ljust(len(header.splitlines()[0]) + 1)
+            
+            # Seek to the beginning and overwrite the first line
+            f.seek(0)
+            f.write(end_time_line.encode())
+            f.close()
             if backward==True:
                 pass
              ###   f_bw.close()
