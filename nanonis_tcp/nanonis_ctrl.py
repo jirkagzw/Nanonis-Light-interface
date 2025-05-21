@@ -23,7 +23,7 @@ class nanonis_ctrl:
 
 # it is recommended to construct body first so that you don't need to calculate the body size by yourself
 # SI units are used in this module
-######################################## Bias Module #############################################
+
 
 
 
@@ -135,6 +135,8 @@ class nanonis_ctrl:
         # Close the file
         fn.close()
         return (data)
+    
+    ######################################## Bias Module #############################################
 
     def BiasSet(self, bias, prt=if_print):
         """
@@ -166,8 +168,6 @@ class nanonis_ctrl:
         
         if prt: 
             print('\n' + bias_df.to_string(header=False) + '\n\nBias set.')
-        else:
-            print('output suppressed')
         return bias_df 
 
     def BiasGet(self, prt=if_print):
@@ -3288,6 +3288,257 @@ class nanonis_ctrl:
               tip_shaper_props_df.to_string(header=False)+
               '\n\nTip shaper procedure returned.')
         return tip_shaper_props_df
+    
+######################################## Coarse Motion Module #############################################
+
+    def MotorStartMove(self, direction, number_of_steps, group, wait_until_finished, prt=if_print):
+        """
+        Moves the coarse positioning device (motor, piezo actuator...).
+
+        Parameters:
+            direction (int): Selects in which direction to move. 
+                           Valid values are 0=X+, 1=X-, 2=Y+, 3=Y-, 4=Z+, 5=Z-
+            number_of_steps (int): Defines the number of steps to move in the specified direction.
+            group (int): The selection of the groups defined in the motor control module. 
+                         If the motor doesn’t support the selection of groups, set it to 0.
+                         Valid values are 0=Group 1, 1=Group 2, 2=Group 3, 3=Group 4, 4=Group 5, 5=Group 6
+            wait_until_finished (int): Defines if this function only returns (1=True) when the 
+                                     motor reaches its destination or the movement stops.
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+
+        Returns:
+            pd.DataFrame: A DataFrame with the coarse motion parameters.
+        """
+
+        body  = self.tcp.dtype_cvt(direction, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(number_of_steps, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(group, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(wait_until_finished, 'uint32', 'bin')
+        header = self.tcp.header_construct('Motor.StartMove', body_size = len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+
+        self.tcp.print_err(res_err)
+        motor_start_move_df = pd.DataFrame({'Direction': direction,
+                                            'Number of steps': number_of_steps,
+                                            'Group': group,
+                                            'Wait until finished': self.tcp.bistate_cvt(wait_until_finished)},
+                                            index=[0]).T
+
+        if prt: 
+            print('\n'+
+                motor_start_move_df.to_string(header=False)+
+                '\n\nMotor started moving.')
+        return motor_start_move_df
+
+    def MotorStartClosedLoop(self, abs_rel, target_x, target_y, target_z, wait_until_finished, group, prt=if_print):
+        """
+        Moves the coarse positioning device (motor, piezo actuator…) in closed loop.
+        This is not supported by all motor control modules.
+
+        Parameters:
+            abs_rel (int): Selects if moving in relative (0=rel) or in absolute (1=abs) movement.
+            target_x (float): The X target position to move in meters.
+            target_y (float): The Y target position to move in meters.
+            target_z (float): The Z target position to move in meters.
+            wait_until_finished (int): Defines if this function only returns (1=True) when the 
+                                     motor reaches its destination or the movement stops.
+            group (int): The selection of the groups defined in the motor control module. 
+                         If the motor doesn’t support the selection of groups, set it to 0.
+                         Valid values are 0=Group 1, 1=Group 2, 2=Group 3, 3=Group 4, 4=Group 5, 5=Group 6
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+
+        Returns:
+            pd.DataFrame: A DataFrame with the closed loop motion parameters.
+        """
+        target_x = self.tcp.unit_cvt(target_x)
+        target_y = self.tcp.unit_cvt(target_y)
+        target_z = self.tcp.unit_cvt(target_z)
+
+        body  = self.tcp.dtype_cvt(abs_rel, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(target_x, 'float64', 'bin')
+        body += self.tcp.dtype_cvt(target_y, 'float64', 'bin')
+        body += self.tcp.dtype_cvt(target_z, 'float64', 'bin')
+        body += self.tcp.dtype_cvt(wait_until_finished, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(group, 'uint32', 'bin')
+        header = self.tcp.header_construct('Motor.StartClosedLoop', body_size = len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+
+        self.tcp.print_err(res_err)
+        motor_start_closed_loop_df = pd.DataFrame({'Absolute/relative': abs_rel,
+                                                    'Target X(m)': target_x,
+                                                    'Target Y(m)': target_y,
+                                                    'Target Z(m)': target_z,
+                                                    'Wait until finished': self.tcp.bistate_cvt(wait_until_finished),
+                                                    'Group': group},
+                                                    index=[0]).T
+
+        if prt: 
+            print('\n'+
+                motor_start_closed_loop_df.to_string(header=False)+
+                '\n\nMotor started closed loop movement.')
+        return motor_start_closed_loop_df
+
+    def MotorStopMove(self, prt=if_print):
+        """
+        Stops the motor motion.
+
+        Parameters:
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+        """
+        header = self.tcp.header_construct('Motor.StopMove', body_size=0)
+
+        self.tcp.cmd_send(header)
+        _, _, res_err = self.tcp.res_recv()
+
+        self.tcp.print_err(res_err)
+        if prt:
+            print('Motor stopped.')
+
+    def MotorPosGet(self, group, timeout, prt=if_print):
+        """
+        Returns the positions of the motor control module.
+
+        Parameters:
+            group (int): The selection of the groups defined in the motor control module. 
+                         If the motor doesn’t support the selection of groups, set it to 0.
+                         Valid values are 0=Group 1, 1=Group 2, 2=Group 3, 3=Group 4, 4=Group 5, 5=Group 6
+            timeout (int): How long to wait in milliseconds to get the positions. 
+                           If the specified timeout is reached, the function returns. 
+                           It is recommendable to set this value to 500 (ms)
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the motor positions.
+        """
+        body  = self.tcp.dtype_cvt(group, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(timeout, 'uint32', 'bin')
+        header = self.tcp.header_construct('Motor.PosGet', body_size = len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, res_arg, res_err = self.tcp.res_recv('float64', 'float64', 'float64')
+
+        self.tcp.print_err(res_err)
+        motor_pos_df = pd.DataFrame({'X(m)': res_arg[0],
+                                    'Y(m)': res_arg[1],
+                                    'Z(m)': res_arg[2]},
+                                    index=[0]).T
+
+        if prt: 
+            print('\n'+
+                motor_pos_df.to_string(header=False)+
+                '\n\nMotor positions returned.')
+        return motor_pos_df
+
+    def MotorStepCounterGet(self, reset_x, reset_y, reset_z, prt=if_print):
+        """
+        Returns the step counter values of X, Y, and Z. 
+        This function also allows to reset the step counters after reading their values 
+        through the inputs Reset X, Reset Y, and Reset Z. 
+        Currently this function is only available in Attocube ANC150 devices.
+
+        Parameters:
+            reset_x (int): Resets the Step Counter X after reading its value. 0 means False, and 1 means True
+            reset_y (int): Resets the Step Counter Y after reading its value. 0 means False, and 1 means True
+            reset_z (int): Resets the Step Counter Z after reading its value. 0 means False, and 1 means True
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the step counter values.
+        """
+        body  = self.tcp.dtype_cvt(reset_x, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(reset_y, 'uint32', 'bin')
+        body += self.tcp.dtype_cvt(reset_z, 'uint32', 'bin')
+        header = self.tcp.header_construct('Motor.StepCounterGet', body_size = len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, res_arg, res_err = self.tcp.res_recv('int', 'int', 'int')
+
+        self.tcp.print_err(res_err)
+        motor_step_counter_df = pd.DataFrame({'Step counter X': res_arg[0],
+                                            'Step counter Y': res_arg[1],
+                                            'Step counter Z': res_arg[2]},
+                                            index=[0]).T
+
+        if prt: 
+            print('\n'+
+                motor_step_counter_df.to_string(header=False)+
+                '\n\nMotor step counter values returned.')
+        return motor_step_counter_df
+
+    def MotorFreqAmpGet(self, axis, prt=if_print):
+        """
+        Returns the frequency (Hz) and amplitude (V) of the motor control module. 
+        This function is only available for PD5, PMD4, and Attocube ANC150 devices.
+
+        Parameters:
+            axis (int): Defines which axis these parameters will be applied to. 
+                        0 means Default, 1 means X, 2 means Y, 3 means Z
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the frequency and amplitude.
+        """
+        body  = self.tcp.dtype_cvt(axis, 'uint16', 'bin')
+        header = self.tcp.header_construct('Motor.FreqAmpGet', body_size = len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, res_arg, res_err = self.tcp.res_recv('float32', 'float32')
+
+        self.tcp.print_err(res_err)
+        motor_freq_amp_df = pd.DataFrame({'Frequency (Hz)': res_arg[0],
+                                        'Amplitude (V)': res_arg[1]},
+                                        index=[0]).T
+
+        if prt: 
+            print('\n'+
+                motor_freq_amp_df.to_string(header=False)+
+                '\n\nMotor frequency and amplitude returned.')
+        return motor_freq_amp_df
+
+    def MotorFreqAmpSet(self, frequency, amplitude, axis, prt=if_print):
+        """
+        Sets the frequency (Hz) and amplitude (V) of the motor control module.
+        This function is only available for PD5, PMD4, and Attocube ANC150 devices.
+
+        Parameters:
+            frequency (float): The frequency in Hz.
+            amplitude (float): The amplitude in V.
+            axis (int): Defines which axis these parameters will be applied to. 
+                        0 means All, 1 means X, 2 means Y, 3 means Z
+            prt (bool, optional): Whether to print the result. Default is `if_print`.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the set frequency and amplitude.
+        """
+        body  = self.tcp.dtype_cvt(frequency, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(amplitude, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(axis, 'uint16', 'bin')
+        header = self.tcp.header_construct('Motor.FreqAmpSet', body_size = len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+
+        self.tcp.print_err(res_err)
+        motor_freq_amp_set_df = pd.DataFrame({'Frequency (Hz)': frequency,
+                                            'Amplitude (V)': amplitude,
+                                            'Axis': axis},
+                                            index=[0]).T
+
+        if prt: 
+            print('\n'+
+                motor_freq_amp_set_df.to_string(header=False)+
+                '\n\nMotor frequency and amplitude set.')
+        return motor_freq_amp_set_df
 
 ######################################## Generic Sweeper Module #############################################
     def GenSwpAcqChsSet(self, num_chs, ch_idx, prt = if_print):
@@ -4504,6 +4755,33 @@ class nanonis_ctrl:
               '\n\nSession folder path set.')
         return util_session_path_df
     
+    def UtilVersionGet(self, prt = if_print):
+        """
+        Retrieves the version information of the Nanonis software.
+    
+        Parameters:
+            prt (bool): Whether to print the output (default is False).
+    
+        Returns:
+            pd.DataFrame: A DataFrame containing the version information.
+        """
+        header = self.tcp.header_construct('Util.VersionGet', body_size=0)
+    
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('str', 'str', 'uint32', 'uint32')
+    
+        self.tcp.print_err(res_err)
+        version_df = pd.DataFrame({
+            'Product Line': res_arg[0],
+            'Software Version': res_arg[1],
+            'Host App. Release': res_arg[2],
+            'RT Engine Release': res_arg[3]
+        }, index=[0]).T
+    
+        if prt:
+            print('\n' + version_df.to_string(header=False) + '\n\nVersion information retrieved.')
+
+        return version_df
 
     # def UtilSettingsLoad(self, prt = if_print):
 
