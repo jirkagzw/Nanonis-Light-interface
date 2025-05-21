@@ -17,7 +17,7 @@ class tcp_ctrl:
 ############################### functions #####################################
 #################### basic functions for creating commands ####################
     # create a connection between tcp client and nanonis software
-    def __init__(self, TCP_IP = '127.0.0.1', PORT = 6501, buffersize = 1048576, version=999999): # buffer size = 10 kb
+    def __init__(self, TCP_IP = '127.0.0.1', PORT = 6501, buffersize = ,buffersize=50*1024*1024, version=999999): # buffer size = 50 MB enough for tip recorder 200k samples of 62 channels 
         """
        Parameters
        IP              : Listening IP address
