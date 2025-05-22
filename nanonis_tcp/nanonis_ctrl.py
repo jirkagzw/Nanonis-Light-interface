@@ -4612,6 +4612,53 @@ class nanonis_ctrl:
               '\n\nData Logger properties returned.')
         return datalog_props_df
     
+    def DataLogPropsChange(self,
+    acqtime,
+    lst_module=None,
+    **kwargs):
+        """
+        Set Data Logger acquisition parameters with optional updates.
+    
+        Parameters:
+            acqtime (float): Acquisition time in seconds.
+            lst_module (list of str): Optional list of module names to log.
+            kwargs:
+                comment (str): Optional comment for saved file.
+                basename (str): Optional base name for file.
+                acqmode (int): Acquisition mode: 2 = Timed, 1 = Continuous.
+                averaging (int): Number of samples to average.
+        """
+        # Default module list
+        if lst_module is None:
+            lst_module = [
+                "NanonisMain", "Bias", "Current", "Z-Controller", 
+                "Ext. VI 1", "Piezo Configuration",
+                "Oscillation Control", "Scan", "Lock-in"
+            ]
+    
+        # Get current properties
+        df = self.DataLogPropsGet().T
+    
+        # Optional updates
+        df['Acquisition mode'] = int(kwargs.get('acqmode', 0))        # 0 = no change
+        df['Averaging'] = int(kwargs.get('averaging', 0))             # 0 = no change
+        if 'basename' in kwargs:
+            df['Basename'] = kwargs['basename']
+        if 'comment' in kwargs:
+            df['Comment'] = kwargs['comment']
+    
+        # Set acquisition duration
+        df['Acquisition duration (hours)'] = 0
+        df['Acquisition duration (minutes)'] = 0
+        df['Acquisition duration (seconds)'] = float(acqtime)
+    
+        # Set modules
+        df['lst_module'] = [lst_module]
+    
+        # Apply settings
+        args = df.values[0]
+        self.DataLogPropsSet(*args)
+    
 ######################################## User output module #############################################
 
     def UserOutValSet(self, index, value, prt = if_print):
