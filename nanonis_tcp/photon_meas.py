@@ -17,12 +17,20 @@ from scipy.ndimage import median_filter
 import requests
 from queue import Queue
 from io import StringIO  # Import StringIO for in-memory text handling
-
+from .log_utils import apply_logging, init_logger
+@apply_logging
 class photon_meas:
-    def __init__(self, connect,connect2=None, connect3=None): #connect2 = andor
+    def __init__(self, connect,connect2=None, connect3=None, logging=True): #connect2 = andor
         self.connect = connect
         self.connect2=connect2
         self.connect3=connect3
+        self.logging_enabled = logging
+        try:
+            session_path = self.connect.UtilSessionPathGet().loc['Session path', 0]
+            init_logger(session_path)
+        except Exception as e:
+            print(f"Failed to initialize logger: {e}")
+
         self.signal_names = self.connect.SignalsNamesGet() 
         # Initialize URL placeholders
         self.url_cal = None
@@ -1220,9 +1228,11 @@ class photon_meas:
             if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"] or value != readmode):
                 print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
                 self.connect2.readmode_set(readmode)
+                settings.at[index, 'Value'] = readmode  # Update settings DataFrame
             elif code == 'GAM' and value != 1:
                 print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
                 self.connect2.acqmode_set(1)
+                settings.at[index, 'Value'] = 1  # Update settings DataFrame
         data_dict = {}
         try:
             for i in range(int(acqnum)):
@@ -1652,7 +1662,7 @@ Channels=Counts
         # check if spectrograph setting is corrent and eventually change it
         for index, row in settings.iterrows():
             code = row['Code']
-            value = row['Value']
+            value = int(row['Value'])
             if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"]):
                 print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
                 self.connect2.readmode_set(readmode)
@@ -2453,7 +2463,7 @@ Channels=Counts
         except Exception as e:
             raise RuntimeError(f"An error occurred: {e}")  # Error handling
             
-    def fetch_data_from_queue(self, backward,cal,file,matching_signals,signal_array,fetch_queue: Queue, delta: float, andor_array: np.ndarray):
+    def fetch_data_from_queue(self, backward,cal,file,matching_signals,signal_array,andor_settings,fetch_queue: Queue, delta: float, andor_array: np.ndarray,file_bw=None):
         """
         Fetches data from an external source and processes it.
     
@@ -2491,12 +2501,20 @@ Points={n}
 Channels=Counts
 '''
                 file.write(header2.encode())
+                
+                settings_str = andor_settings.apply(lambda row: f"{row['Code']}={row['Value']}",axis=1).str.cat(sep='\n') + '\n'
+                file.write(settings_str.encode())
+                
                 andor_chan_names= calib.tolist()
                 chnames = [f"wl {i}=" + str(item) for i, item in enumerate(andor_chan_names)]
                 file.write(('\n'.join(chnames)+"\n").encode())
                 file.write((':HEADER_END:\n').encode())
+                if backward==True:
+                    file_bw.write(header2.encode())
+                    file_bw.write(settings_str.encode())
+                    file_bw.write(('\n'.join(chnames)+"\n").encode())
+                    file_bw.write((':HEADER_END:\n').encode())
                 
-            
             try:
                 #print(self.kinser_dat)
                 response = requests.get(self.kinser_dat)  # Fetch data
@@ -2510,6 +2528,13 @@ Channels=Counts
                     half_size = data.size // 2
                     andor_array[2*i, :, :] = data[:half_size].reshape(half_size // n, n)  # First half
                     andor_array[2*i+1, :, :] = data[half_size:].reshape(half_size // n, n)  # Second half
+                    for j in range(signal_array.shape[1]-1,-1):
+                        nanonis_data_bw = np.array([float(calib[0]), float(calib[-1])] + list(signal_array[2*i, j, :]))
+                        andor_data_bw = andor_array[2*i+1, j, :]
+                        
+                        # Convert to the correct dtype and write to file
+                        nanonis_data_bw.astype(">f4").tofile(file_bw)
+                        andor_data_bw.astype(">f4").tofile(file_bw)
                     
                 else:  # Case for backward == False
                     andor_array[i, :, :] = data.reshape(data.size // n, n)  # Reshape and assign
@@ -2530,7 +2555,41 @@ Channels=Counts
                 fetch_queue.task_done()  # Mark the task as done
                 i+=1
     
-    def photon_map_k(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,direction="up",backward=False,bw_ratio=10,readmode=0,wait_time=None):       
+    def photon_map_k(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,direction="up",backward=False,bw_ratio=10,readmode=0,wait_time=None):     
+        """
+ Perform a photon mapping scan for a given experimental setup.
+
+ This function sets up the acquisition parameters, prepares the Andor camera, and processes 
+ the data based on the provided configuration. It includes setting the scan dimensions, 
+ preparing the scan buffer, and managing the scan direction. The data is collected, 
+ reshaped, and written to a file in a structured format.
+
+ Args:
+     acqtime (float): Acquisition time per pixel (in seconds). Default is 10 seconds.
+     pix (tuple): Tuple of two integers specifying the number of pixels in the x and y dimensions.
+     dim (tuple, optional): Tuple specifying the dimensions of the scan (width, height in nanometers). 
+                            If not provided, dimensions are determined from the scan frame.
+     name (str): Name for the experiment, used in file naming. Default is "LS-man".
+     user (str): Name of the user performing the experiment. Default is "Jirka".
+     signal_names (list, optional): List of signal names to retrieve from the system. Default is None.=
+     direction (str): Direction of the scan. Can be "up" or "down". Default is "up".
+     backward (bool): Whether the scan is backward (zigzag pattern). Default is False.
+     bw_ratio (float): Ratio to adjust the backward scan speed. Default is 10.
+     readmode (int): Mode for the camera acquisition. Default is 0.
+     wait_time (float, optional): Time in seconds to wait before starting the next acquisition. Default is None.
+
+ Returns:
+     None: The function doesn't return any value but writes the scanned data to a file.
+
+ Raises:
+     RuntimeError: If an error occurs during setup, data fetching, or file writing.
+ 
+ Notes:
+     - The function automatically adjusts settings based on the connected camera's configuration.
+     - It prepares the camera for image mode (if necessary) and sets the acquisition mode.
+     - The function assumes a zigzag scanning pattern, with the option for backward scanning.
+     - Data is fetched from the Andor camera, processed, and saved in a 3D file format.
+ """
         s_time=time.perf_counter()
         bw_fact = 2 if backward else 1
         #first try communication with andor
@@ -2540,7 +2599,7 @@ Channels=Counts
             andor=True
             for index, row in settings.iterrows():
                 code = row['Code']
-                value = row['Value']
+                value = int(row['Value'])
                 if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"]):
                     print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
                     self.connect2.readmode_set(readmode)
@@ -2559,6 +2618,7 @@ Channels=Counts
             #raise RuntimeError(f"An error occurred: {e}")  # Error handling
             print(e)
             andor=False
+            settings=[]
         print("andor",andor)
         # Retrieve scan frame and set default dimensions if not provided
         SF = self.connect.ScanFrameGet()
@@ -2644,9 +2704,10 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
 
 '''
         if backward==True:
-            filename_3ds_bw = self.connect.get_next_filename("G"+name+'_bw', extension='.3ds', folder=folder)
-          ###  f_bw = open(filename_3ds_bw, 'wb')
-          ###  f_bw.write(header.encode())
+           # filename_3ds_bw = self.connect.get_next_filename("G"+name+'_bw', extension='.3ds', folder=folder)
+            filename_3ds_bw = filename_3ds.replace(name, f"{name}_bw")
+            f_bw = open(filename_3ds_bw, 'wb')
+            f_bw.write(header.encode())
 
         f = open(filename_3ds, 'wb')
         f.write(header.encode())
@@ -2656,7 +2717,10 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
             #start andor queue for data downloading and processing
             fetch_queue = Queue()  # Create a queue for URLs to fetch
             delta = 0.05  # Set your desired delay time
-            fetch_thread = threading.Thread(target=self.fetch_data_from_queue, args=(backward,cal,f,matching_signals,signal_array,fetch_queue, delta,andor_array))
+            if backward==True:
+                fetch_thread = threading.Thread(target=self.fetch_data_from_queue, args=(backward,cal,f,matching_signals,signal_array,settings,fetch_queue, delta,andor_array,f_bw))
+            else:
+                fetch_thread = threading.Thread(target=self.fetch_data_from_queue, args=(backward,cal,f,matching_signals,signal_array,settings,fetch_queue, delta,andor_array))
             fetch_thread.start()  # Start the fetch thread
         
 
@@ -2746,6 +2810,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                 fetch_queue.join()  # Wait until all items in the queue have been processed
                 fetch_queue.put(None)  # Send a shutdown signal to the fetch thread
                 fetch_thread.join()  # Wait for the fetch thread to finish
+                self.connect2.acqmode_set(1)
               #  print("Shutdown complete.")
             
             end_time_scan = time.perf_counter()
@@ -2760,8 +2825,11 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
             f.write(end_time_line.encode())
             f.close()
             if backward==True:
-                pass
-             ###   f_bw.close()
+                # Seek to the beginning and overwrite the first line
+                f_bw.seek(0)
+                f_bw.write(end_time_line.encode())
+                f_bw.close()
+                f_bw.close()
             filename_sxm = self.connect.get_next_filename("M"+name,extension='.sxm',folder=folder)
            ### settings_dict=(dict(zip(settings.T.iloc[0], settings.T.iloc[1].astype(str))))
             scan_par = {

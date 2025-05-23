@@ -7,7 +7,8 @@ import pandas as pd
 import numpy as np
 import os
 import re
-
+from .log_utils import apply_logging, init_logger
+@apply_logging
 class nanonis_ctrl:
     # Class variables
     # To change the value of class variable in your script, use this: 
@@ -20,6 +21,12 @@ class nanonis_ctrl:
         # self.f_print = False
         self.mod_index=PLL_modulator_index
         self.version=self.tcp.version
+        
+        try:
+            session_path = self.UtilSessionPathGet().loc['Session path', 0]
+            init_logger(session_path)
+        except Exception as e:
+            print(f"Failed to initialize logger: {e}")
 
 # it is recommended to construct body first so that you don't need to calculate the body size by yourself
 # SI units are used in this module

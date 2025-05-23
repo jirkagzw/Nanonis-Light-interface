@@ -11,7 +11,8 @@ from os import mkdir
 from os.path import exists
 import time
 import numpy as np
-
+from .log_utils import apply_logging, init_logger
+@apply_logging
 class andor_meas:
     # Class variables
     # To change the value of class variable in your script, use this: 
