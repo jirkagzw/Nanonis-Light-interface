@@ -501,8 +501,42 @@ class photon_meas:
             Vz_nm=df.values[3][0]*1e9+dVz_nm
             
         self.connect.PiezoDriftCompSet(compensation,Vx_nm*1e-9,Vy_nm*1e-9,Vz_nm*1e-9,10)
-        
+
     def scan(self, direction="up", wait=True):
+        """
+        Start a scan in the given direction and optionally wait for it to complete.
+        No data is retrieved.
+    
+        Parameters
+        ----------
+        direction : str or bool or int
+            The scan direction: 'up', 'down', True, False, 0, or 1.
+        wait : bool
+            If True, waits for scan to finish.
+        """
+        if direction in ["up", True, 0]:
+            direction = 1
+        elif direction in ["down", False, 1]:
+            direction = 0
+        else:
+            raise ValueError("Invalid direction. Use 'up', 'down', True, False, 0, or 1.")
+    
+        self.connect.ScanAction(0, direction)  # Start scan
+    
+        if not wait:
+            return  # Exit immediately if no waiting
+    
+        try:
+            while True:
+                df = self.connect.ScanWaitEndOfScan(1)  # Wait with 1-second timeout
+                if 'Timeout status' in df.index and float(df.loc['Timeout status', 0]) == 0:
+                    break  # Scan finished
+        except KeyboardInterrupt:
+            print("Interrupted by user. Attempting to stop scan.")
+            self.connect.ScanAction(1, direction)  # Stop scan
+            print("Scan stopped gracefully.")
+    
+    def scan_old(self, direction="up", wait=True):
         """
         Perform a scan in the specified direction and wait until completion or interruption.
         
