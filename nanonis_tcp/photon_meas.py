@@ -566,7 +566,7 @@ class photon_meas:
                 data_fw.append(self.connect.ScanFrameDataGrab(channel, 0)[0].to_numpy())
                 data_bw.append(self.connect.ScanFrameDataGrab(channel, 1)[0].to_numpy())
         
-        return np.stack(data_fw), np.stack(data_bw), channels
+        #return np.stack(data_fw), np.stack(data_bw), channels
     
     def scan_pause(self):
         """
