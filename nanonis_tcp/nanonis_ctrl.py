@@ -4769,6 +4769,340 @@ class nanonis_ctrl:
         self.tcp.print_err(res_err)
         return
 
+######################################## Kelvin Controller Module #############################################
+
+    def KelvinCtrlOnOffSet(self, ctrl_status, prt=if_print):
+        """
+        KelvinCtrl.CtrlOnOffSet
+        Switches the Kelvin Controller on or off.
+
+        Parameters
+        ----------
+        ctrl_status : int
+            Controller On/Off (unsigned int32) where 0 = Off, 1 = On.
+        prt : bool, optional
+            Whether to print the result (default is if_print).
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the Kelvin Controller on/off status.
+        """
+        body = self.tcp.dtype_cvt(ctrl_status, 'uint32', 'bin')
+        header = self.tcp.header_construct('KelvinCtrl.CtrlOnOffSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+
+        self.tcp.print_err(res_err)
+        ctrl_df = pd.DataFrame({'Kelvin Controller status': self.tcp.bistate_cvt(ctrl_status)}, index=[0]).T
+
+        if prt:
+            print('\n' + ctrl_df.to_string(header=False) + '\n\nKelvin Controller On/Off set.')
+        return ctrl_df
+
+    def KelvinCtrlOnOffGet(self, prt=if_print):
+        """
+        KelvinCtrl.CtrlOnOffGet
+        Returns the status of the Kelvin Controller.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the Kelvin Controller on/off status.
+        """
+        header = self.tcp.header_construct('KelvinCtrl.CtrlOnOffGet', 0)
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('uint32')
+
+        self.tcp.print_err(res_err)
+        ctrl_df = pd.DataFrame({'Kelvin Controller status': self.tcp.bistate_cvt(res_arg[0])}, index=[0]).T
+
+        if prt:
+            print('\n' + ctrl_df.to_string(header=False) + '\n\nKelvin Controller On/Off status returned.')
+        return ctrl_df
+
+    def KelvinCtrlSetpntSet(self, setpoint, prt=if_print):
+        """
+        KelvinCtrl.SetpntSet
+        Sets the Kelvin Controller setpoint.
+
+        Parameters
+        ----------
+        setpoint : float
+            Controller setpoint (float32).
+        prt : bool, optional
+            Whether to print the result (default is if_print).
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the set Kelvin Controller setpoint.
+        """
+        setpoint = self.tcp.unit_cvt(setpoint)
+        body = self.tcp.dtype_cvt(setpoint, 'float32', 'bin')
+        header = self.tcp.header_construct('KelvinCtrl.SetpntSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+
+        sp_df = pd.DataFrame({'Kelvin Controller setpoint': setpoint}, index=[0]).T
+        if prt:
+            print('\n' + sp_df.to_string(header=False) + '\n\nKelvin Controller setpoint set.')
+        return sp_df
+
+    def KelvinCtrlSetpntGet(self, prt=if_print):
+        """
+        KelvinCtrl.SetpntGet
+        Returns the Kelvin Controller setpoint.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the current setpoint.
+        """
+        header = self.tcp.header_construct('KelvinCtrl.SetpntGet', 0)
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('float32')
+
+        self.tcp.print_err(res_err)
+        sp_df = pd.DataFrame({'Kelvin Controller setpoint': res_arg[0]}, index=[0]).T
+
+        if prt:
+            print('\n' + sp_df.to_string(header=False) + '\n\nKelvin Controller setpoint returned.')
+        return sp_df
+
+    def KelvinCtrlGainSet(self, p_gain, time_const, slope, prt=if_print):
+        """
+        KelvinCtrl.GainSet
+        Sets the regulation loop parameters of the Kelvin Controller.
+
+        Parameters
+        ----------
+        p_gain : float
+            Proportional gain (float32).
+        time_const : float
+            Time constant in seconds (float32).
+        slope : int
+            Slope (uint16), where 0 = no change, 1 = Positive, 2 = Negative.
+        prt : bool, optional
+            Whether to print the result (default is if_print).
+        """
+        body  = self.tcp.dtype_cvt(p_gain, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(time_const, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(slope, 'uint16', 'bin')
+        header = self.tcp.header_construct('KelvinCtrl.GainSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+
+        gain_df = pd.DataFrame({'P-gain': p_gain,
+                                'Time constant (s)': time_const,
+                                'Slope': slope}, index=[0]).T
+        if prt:
+            print('\n' + gain_df.to_string(header=False) + '\n\nKelvin Controller gain set.')
+        return gain_df
+
+    def KelvinCtrlGainGet(self, prt=if_print):
+        """
+        KelvinCtrl.GainGet
+        Returns the regulation loop parameters of the Kelvin Controller.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the gain parameters.
+        """
+        header = self.tcp.header_construct('KelvinCtrl.GainGet', 0)
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('float32', 'float32', 'uint16')
+
+        self.tcp.print_err(res_err)
+        gain_df = pd.DataFrame({'P-gain': res_arg[0],
+                                'Time constant (s)': res_arg[1],
+                                'Slope': res_arg[2]}, index=[0]).T
+        if prt:
+            print('\n' + gain_df.to_string(header=False) + '\n\nKelvin Controller gain returned.')
+        return gain_df
+
+    def KelvinCtrlModParamsSet(self, freq, amplitude, phase, prt=if_print):
+        """
+        KelvinCtrl.ModParamsSet
+        Sets the modulation parameters of the Kelvin Controller.
+
+        Parameters
+        ----------
+        freq : float
+            Frequency in Hz (float32).
+        amplitude : float
+            Amplitude (float32).
+        phase : float
+            Phase in degrees (float32).
+        """
+        body  = self.tcp.dtype_cvt(freq, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(amplitude, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(phase, 'float32', 'bin')
+        header = self.tcp.header_construct('KelvinCtrl.ModParamsSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+
+        mod_df = pd.DataFrame({'Frequency (Hz)': freq,
+                               'Amplitude': amplitude,
+                               'Phase (deg)': phase}, index=[0]).T
+        if prt:
+            print('\n' + mod_df.to_string(header=False) + '\n\nKelvin Controller modulation parameters set.')
+        return mod_df
+
+    def KelvinCtrlModParamsGet(self, prt=if_print):
+        """
+        KelvinCtrl.ModParamsGet
+        Returns the modulation parameters of the Kelvin Controller.
+        """
+        header = self.tcp.header_construct('KelvinCtrl.ModParamsGet', 0)
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('float32', 'float32', 'float32')
+        self.tcp.print_err(res_err)
+
+        mod_df = pd.DataFrame({'Frequency (Hz)': res_arg[0],
+                               'Amplitude': res_arg[1],
+                               'Phase (deg)': res_arg[2]}, index=[0]).T
+        if prt:
+            print('\n' + mod_df.to_string(header=False) + '\n\nKelvin Controller modulation parameters returned.')
+        return mod_df
+
+    def KelvinCtrlModOnOffSet(self, ac_mode, mod_onoff, prt=if_print):
+        """
+        KelvinCtrl.ModOnOffSet
+        Switches the Kelvin Controller AC mode and modulation.
+
+        Parameters
+        ----------
+        ac_mode : int
+            AC mode On/Off (uint16), where 0 = no change, 1 = On, 2 = Off.
+        mod_onoff : int
+            Modulation On/Off (uint16), where 0 = Off, 1 = On.
+        """
+        body  = self.tcp.dtype_cvt(ac_mode, 'uint16', 'bin')
+        body += self.tcp.dtype_cvt(mod_onoff, 'uint16', 'bin')
+        header = self.tcp.header_construct('KelvinCtrl.ModOnOffSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+
+        mod_df = pd.DataFrame({'AC mode': ac_mode,
+                               'Modulation': mod_onoff}, index=[0]).T
+        if prt:
+            print('\n' + mod_df.to_string(header=False) + '\n\nKelvin Controller AC/Modulation set.')
+        return mod_df
+
+    def KelvinCtrlModOnOffGet(self, prt=if_print):
+        """
+        KelvinCtrl.ModOnOffGet
+        Returns the status of the Kelvin Controller AC mode and modulation.
+        """
+        header = self.tcp.header_construct('KelvinCtrl.ModOnOffGet', 0)
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('uint16', 'uint16')
+        self.tcp.print_err(res_err)
+
+        mod_df = pd.DataFrame({'AC mode status': res_arg[0],
+                               'Modulation status': res_arg[1]}, index=[0]).T
+        if prt:
+            print('\n' + mod_df.to_string(header=False) + '\n\nKelvin Controller AC/Modulation status returned.')
+        return mod_df
+
+    def KelvinCtrlCtrlSignalSet(self, sig_idx, prt=if_print):
+        """
+        KelvinCtrl.CtrlSignalSet
+        Sets the demodulated/control signal index of the Kelvin Controller.
+
+        Parameters
+        ----------
+        sig_idx : int
+            Demodulated/Control signal index.
+        """
+        body = self.tcp.dtype_cvt(sig_idx, 'int', 'bin')
+        header = self.tcp.header_construct('KelvinCtrl.CtrlSignalSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+
+        sig_df = pd.DataFrame({'Control signal index': sig_idx}, index=[0]).T
+        if prt:
+            print('\n' + sig_df.to_string(header=False) + '\n\nKelvin Controller control signal index set.')
+        return sig_df
+
+    def KelvinCtrlCtrlSignalGet(self, prt=if_print):
+        """
+        KelvinCtrl.CtrlSignalGet
+        Returns the demodulated/control signal index of the Kelvin Controller.
+        """
+        header = self.tcp.header_construct('KelvinCtrl.CtrlSignalGet', 0)
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('int')
+        self.tcp.print_err(res_err)
+
+        sig_df = pd.DataFrame({'Control signal index': res_arg[0]}, index=[0]).T
+        if prt:
+            print('\n' + sig_df.to_string(header=False) + '\n\nKelvin Controller control signal index returned.')
+        return sig_df
+
+    def KelvinCtrlAmpGet(self, prt=if_print):
+        """
+        KelvinCtrl.AmpGet
+        Returns the amplitude of the demodulated/control signal.
+        """
+        header = self.tcp.header_construct('KelvinCtrl.AmpGet', 0)
+        self.tcp.cmd_send(header)
+        _, res_arg, res_err = self.tcp.res_recv('float32')
+        self.tcp.print_err(res_err)
+
+        amp_df = pd.DataFrame({'Amplitude': res_arg[0]}, index=[0]).T
+        if prt:
+            print('\n' + amp_df.to_string(header=False) + '\n\nKelvin Controller amplitude returned.')
+        return amp_df
+
+    def KelvinCtrlBiasLimitsSet(self, bias_high, bias_low, prt=if_print):
+        """
+        KelvinCtrl.BiasLimitsSet
+        Sets the bias limits of the Kelvin Controller.
+        The bias voltage will be limited to these values as long as the Kelvin Controller is on.
+
+        Parameters
+        ----------
+        bias_high : float
+            Bias high limit (float32).
+        bias_low : float
+            Bias low limit (float32).
+        """
+        body  = self.tcp.dtype_cvt(bias_high, 'float32', 'bin')
+        body += self.tcp.dtype_cvt(bias_low, 'float32', 'bin')
+        header = self.tcp.header_construct('KelvinCtrl.BiasLimitsSet', len(body))
+        cmd = header + body
+
+        self.tcp.cmd_send(cmd)
+        _, _, res_err = self.tcp.res_recv()
+        self.tcp.print_err(res_err)
+
+        bias_df = pd.DataFrame({'Bias high limit (V)': bias_high,
+                                'Bias low limit (V)': bias_low}, index=[0]).T
+        if prt:
+            print('\n' + bias_df.to_string(header=False) + '\n\nKelvin Controller bias limits set.')
+        return bias_df
+    
+
 ######################################## Utilities Module #############################################
     def UtilSessionPathGet(self, prt = if_print):
         header = self.tcp.header_construct('Util.SessionPathGet', 0)
@@ -4891,3 +5225,4 @@ class nanonis_ctrl:
         
                           
         
+
