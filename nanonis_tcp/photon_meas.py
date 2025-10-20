@@ -33,7 +33,12 @@ class photon_meas:
             init_logger(session_path)
         except Exception as e:
             print(f"Failed to initialize logger: {e}")
-
+        
+        if connect2 is not None:
+            try:
+                self.andor_settings=self.connect2.settings_get()
+            except:
+                self.andor_settings=None
         self.signal_names = self.connect.SignalsNamesGet() 
         # Initialize URL placeholders
         self.url_cal = None
@@ -1216,7 +1221,8 @@ class photon_meas:
         # Initialize variables
         self.connect2.acqtime_set(acqtime)
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
-        settings=self.connect2.settings_get()
+        self.andor_settings = (self.andor_settings if readmode == "KEEP" and self.andor_settings is not None else self.connect2.settings_get()) #update settings or use stored
+        settings = self.andor_settings #
         signal_names_df=self.signal_names 
         relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
         
