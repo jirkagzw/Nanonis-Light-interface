@@ -14,10 +14,13 @@ from datetime import datetime
 import sys
 import math
 from scipy.ndimage import median_filter
+from scipy.signal import savgol_filter
 import requests
 from queue import Queue
 from io import StringIO  # Import StringIO for in-memory text handling
 from .log_utils import apply_logging, init_logger
+from scipy.interpolate import interp1d
+
 @apply_logging
 class photon_meas:
     def __init__(self, connect,connect2=None, connect3=None, logging=True): #connect2 = andor
@@ -501,42 +504,8 @@ class photon_meas:
             Vz_nm=df.values[3][0]*1e9+dVz_nm
             
         self.connect.PiezoDriftCompSet(compensation,Vx_nm*1e-9,Vy_nm*1e-9,Vz_nm*1e-9,10)
-
+        
     def scan(self, direction="up", wait=True):
-        """
-        Start a scan in the given direction and optionally wait for it to complete.
-        No data is retrieved.
-    
-        Parameters
-        ----------
-        direction : str or bool or int
-            The scan direction: 'up', 'down', True, False, 0, or 1.
-        wait : bool
-            If True, waits for scan to finish.
-        """
-        if direction in ["up", True, 0]:
-            direction = 1
-        elif direction in ["down", False, 1]:
-            direction = 0
-        else:
-            raise ValueError("Invalid direction. Use 'up', 'down', True, False, 0, or 1.")
-    
-        self.connect.ScanAction(0, direction)  # Start scan
-    
-        if not wait:
-            return  # Exit immediately if no waiting
-    
-        try:
-            while True:
-                df = self.connect.ScanWaitEndOfScan(1)  # Wait with 1-second timeout
-                if 'Timeout status' in df.index and float(df.loc['Timeout status', 0]) == 0:
-                    break  # Scan finished
-        except KeyboardInterrupt:
-            print("Interrupted by user. Attempting to stop scan.")
-            self.connect.ScanAction(1, direction)  # Stop scan
-            print("Scan stopped gracefully.")
-    
-    def scan_old(self, direction="up", wait=True):
         """
         Perform a scan in the specified direction and wait until completion or interruption.
         
@@ -600,7 +569,7 @@ class photon_meas:
                 data_fw.append(self.connect.ScanFrameDataGrab(channel, 0)[0].to_numpy())
                 data_bw.append(self.connect.ScanFrameDataGrab(channel, 1)[0].to_numpy())
         
-        #return np.stack(data_fw), np.stack(data_bw), channels
+        return np.stack(data_fw), np.stack(data_bw), channels
     
     def scan_pause(self):
         """
@@ -1255,17 +1224,28 @@ class photon_meas:
         nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.float64)
         #andor_array = np.full(andor_shape,np.nan, dtype=np.int64)
         
-        # check if spectrograph setting is corrent and eventually change it
-        for index, row in settings.iterrows():
-            code = row['Code']
-            value = row['Value']
-            if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"] or value != readmode):
-                print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
-                self.connect2.readmode_set(readmode)
-                settings.at[index, 'Value'] = readmode  # Update settings DataFrame
-            elif code == 'GAM' and value != 1:
-                print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
-                self.connect2.acqmode_set(1)
+        if readmode != "KEEP":
+            # check if spectrograph setting is correct and eventually change it
+            for index, row in settings.iterrows():
+                code = row['Code']
+                value = row['Value']
+        
+                if code == 'GRM':
+                    if value == 4:
+                        # Always leave image mode
+                        print(f"Camera in IMAGE mode (4), switching to {readmode} mode.")
+                        self.connect2.readmode_set(readmode)
+                        settings.at[index, 'Value'] = readmode
+        
+                    elif value != readmode:
+                        # Only print & change if actual mode differs from desired
+                        print(f"Changing readmode from {value} to {readmode}.")
+                        self.connect2.readmode_set(readmode)
+                        settings.at[index, 'Value'] = readmode
+        
+                elif code == 'GAM' and value != 1:
+                    print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
+                    self.connect2.acqmode_set(1)
                 settings.at[index, 'Value'] = 1  # Update settings DataFrame
         data_dict = {}
         try:
@@ -2658,6 +2638,19 @@ Channels=Counts
         SF = self.connect.ScanFrameGet()
         dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
         cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2 + (dim[1] / pix[1])/2) if direction == "up" else (-dim[0] / 2, dim[1] / 2 - (dim[1] / pix[1])/2)
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+        # Move to the first point
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
+        # Check if tip recorder window has been opened Scan Control\Follow Me\Show Graph
+        try:
+            _, data_check = self.connect.TipRecDataGet()
+        except Exception:
+            print("TipRec module not ready. Open the module before scanning under Scan Control->Follow Me->Show Graph")
+            return
 
         if signal_names is None:
             signal_names = [
@@ -2683,15 +2676,6 @@ Channels=Counts
         num_chs, ch_idx, pxs, lines = scan_buffer.iloc[:, 0]
         self.connect.ScanBufferSet(len(matching_indices),matching_indices,pxs, lines) 
              
-        # Initial setup for the first point in the bottom-left corner
-        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2 + (dim[1] / pix[1])/2) if direction == "up" else (-dim[0] / 2, dim[1] / 2 - (dim[1] / pix[1])/2)
-        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
-        
-                
-        #prepare Andor, set acqtime anf get acqtime, set it for range(2 * pix[1]) or range pix[1] accumulations
-        
-        # Move to the first point
-        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
         # set bw and fw move speed 
         mv_spd=1e-9*(dim[0]/(acqtime*pix[0]))
         bw_ratio=(min(bw_ratio, 100*1e-9/mv_spd)) #limit bw_spped to max 100 nm/s
@@ -2863,7 +2847,6 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                 f_bw.seek(0)
                 f_bw.write(end_time_line.encode())
                 f_bw.close()
-                f_bw.close()
             filename_sxm = self.connect.get_next_filename("M"+name,extension='.sxm',folder=folder)
            ### settings_dict=(dict(zip(settings.T.iloc[0], settings.T.iloc[1].astype(str))))
             scan_par = {
@@ -2937,7 +2920,567 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
             return(signal_array,andor_array)
         else:
             return(signal_array)
+  
     
+  
+    def fetch_data_from_queue_nanonis(self, backward, file, matching_signals, signal_array, fetch_queue: Queue, delta: float, file_bw=None):
+        """
+        Saves Nanonis data to a 3ds file with placeholder Counts=[0,1].
+        Each pixel keeps its parameters, channel data is minimal.
+        """
+        i = 0
+        bw_fact = 2 if backward else 1
+
+        while True:
+            item = fetch_queue.get()
+            if item is None:
+                break
+
+            time.sleep(delta)
+
+            if i == 0:
+                # header
+                sweep_signal = "None"  # placeholder
+                fixed_parameters = ["Sweep Start", "Sweep End"] + matching_signals
+
+                header = f'''Sweep Signal="{sweep_signal}"
+    Fixed parameters="{';'.join(fixed_parameters)}"
+    Experiment parameters=
+    # Parameters (4 byte)={len(fixed_parameters)}
+    Experiment size (bytes)=4096
+    Points=2
+    Channels=Counts
+    '''
+                file.write(header.encode())
+                file.write((':HEADER_END:\n').encode())
+
+                if backward and file_bw is not None:
+                    file_bw.write(header.encode())
+                    file_bw.write((':HEADER_END:\n').encode())
+
+            # loop over signals (channels)
+            print(signal_array.shape,"shape of the signal array ")
+            for j in range(signal_array.shape[1]):
+                # nanonis data: all parameters for this pixel
+                nanonis_data = np.array(list(signal_array[2*i, j, :]), dtype=np.float32)
+                # placeholder counts of length 2
+                counts = np.array([0, 1], dtype=np.float32)
+
+                nanonis_data.astype(">f4").tofile(file)
+                counts.astype(">f4").tofile(file)
+
+                if backward and file_bw is not None:
+                    nanonis_data.astype(">f4").tofile(file_bw)
+                    counts.astype(">f4").tofile(file_bw)
+
+            fetch_queue.task_done()
+            print(i,"number of iterations")
+            i += 1
+             
+    def write_nanonis_3ds_line(self, line_data, len_data, f_fw, f_bw=None):
+        """
+        Writes one scan line of data (already sliced, shape (n_points, n_signals))
+        to the .3ds file(s).
+        """
+    
+        # Counts channel placeholder (must match "Points=" in header if used as sweep)
+        counts_channel = np.arange(len_data, dtype=np.float32)
+    
+        # Loop through each pixel in the line
+        for px_idx in range(line_data.shape[0]):
+            pixel_signals = line_data[px_idx, :]   # shape (n_signals,)
+    
+            # fixed params (sweep start, sweep end, + signals)
+            nanonis_params = np.array([0.0, 1.0] + list(pixel_signals), dtype=np.float32)
+    
+            # forward scan
+            nanonis_params.astype(">f4").tofile(f_fw)
+            counts_channel.astype(">f4").tofile(f_fw)
+    
+            # backward scan (if file handle provided)
+            if f_bw:
+                nanonis_params.astype(">f4").tofile(f_bw)
+                counts_channel.astype(">f4").tofile(f_bw)
+
+    def bias_test_worker(self, duration, stop_event, center_bias=0, amplitude=0.1, period=1.0, update_rate_local=50):
+            """
+            Apply a test sine waveform with precise timing and drift compensation.
+            Returns: actual timestamps of each BiasSet call (for analysis)
+            """
+            N = max(2, int(update_rate_local * max(0.0001, duration)))
+            t = np.linspace(0, duration, N)
+            waveform = center_bias + amplitude * np.sin(2 * np.pi * t / period)
+            interval = duration / N
+            start_time = time.perf_counter()
+            
+            timestamps = []
+            
+            for i, val in enumerate(waveform):
+                if stop_event.is_set():
+                    break
+                try:
+                    self.connect3.BiasSet(float(val))
+                except Exception as e:
+                    print("[test] BiasSet error:", e)
+                
+                timestamps.append(time.perf_counter())
+                
+                # absolute timing to compensate drift
+                next_time = start_time + (i + 1) * interval
+                while True:
+                    now = time.perf_counter()
+                    if now >= next_time:
+                        break
+                    time.sleep(min(next_time - now, 0.001))
+            
+            return np.array(timestamps)
+    
+    
+    def bias_playback_worker(self, bias_profile, duration, stop_event, update_rate_local=50, smooth_local=False, sg_window=1, sg_poly=0,feed_off=True):
+        """
+        Play back a bias profile over a given duration with precise timing and drift compensation.
+        Returns: actual timestamps of each BiasSet call (for analysis)
+        """
+        if bias_profile is None or len(bias_profile) < 2:
+            return np.array([])
+    
+        prof = np.array(bias_profile, dtype=float)
+        
+        # optional smoothing
+        if smooth_local:
+            wl = sg_window if sg_window % 2 == 1 else sg_window + 1
+            if wl >= len(prof):
+                wl = len(prof) - 1 if (len(prof) - 1) % 2 == 1 else len(prof) - 2
+            if wl >= 3:
+                try:
+                    prof = savgol_filter(prof, wl, sg_poly)
+                except Exception:
+                    pass  # fallback: use raw profile
+        
+        # resample to match update rate
+        N = max(2, int(update_rate_local * max(0.0001, duration)))
+        x_old = np.linspace(0.0, 1.0, len(prof))
+        x_new = np.linspace(0.0, 1.0, N)
+        try:
+            f_interp = interp1d(x_old, prof, kind="linear", bounds_error=False, fill_value=(prof[0], prof[-1]))
+            resampled = f_interp(x_new)
+        except Exception:
+            resampled = np.interp(x_new, x_old, prof)
+    
+        interval = duration / N  # use duration/N for precise total timing
+        t_start = time.perf_counter()
+        timestamps = []
+    
+        for i, val in enumerate(resampled):
+            if stop_event.is_set():
+                break
+            try:
+                if feed_off:
+                    self.connect3.KelvinCtrlOnOffSet(0)
+                    self.connect3.BiasSet(float(val))
+                    self.connect3.KelvinCtrlOnOffSet(1)
+                else:
+                    self.connect3.BiasSet(float(val))
+            except Exception as e:
+                print("BiasSet error:", e)
+            
+            timestamps.append(time.perf_counter())
+            
+            # drift-compensated sleep
+            next_time = t_start + (i + 1) * interval
+            while True:
+                if stop_event.is_set():
+                    return np.array(timestamps)
+                t_now = time.perf_counter()
+                if t_now >= next_time:
+                    break
+                time.sleep(min(next_time - t_now, 0.001))
+    
+    def nanonis_map_k(self, acqtime=10, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,direction="up",backward=False,feedfw=False,bw_ratio=10,ds3=True,len_data=128,fftest=False,plotting=False,ff_factor = 10 ):     
+        """
+ Perform a photon mapping scan for a given experimental setup.
+
+ This function sets up the acquisition parameters, prepares the Andor camera, and processes 
+ the data based on the provided configuration. It includes setting the scan dimensions, 
+ preparing the scan buffer, and managing the scan direction. The data is collected, 
+ reshaped, and written to a file in a structured format.
+
+ Args:
+     acqtime (float): Acquisition time per pixel (in seconds). Default is 10 seconds.
+     pix (tuple): Tuple of two integers specifying the number of pixels in the x and y dimensions.
+     dim (tuple, optional): Tuple specifying the dimensions of the scan (width, height in nanometers). 
+                            If not provided, dimensions are determined from the scan frame.
+     name (str): Name for the experiment, used in file naming. Default is "LS-man".
+     user (str): Name of the user performing the experiment. Default is "Jirka".
+     signal_names (list, optional): List of signal names to retrieve from the system. Default is None.=
+     direction (str): Direction of the scan. Can be "up" or "down". Default is "up".
+     backward (bool): Whether the scan is backward (zigzag pattern). Default is False.
+     bw_ratio (float): Ratio to adjust the backward scan speed. Default is 10.
+     readmode (int): Mode for the camera acquisition. Default is 0.
+     wait_time (float, optional): Time in seconds to wait before starting the next acquisition. Default is None.
+
+ Returns:
+     None: The function doesn't return any value but writes the scanned data to a file.
+
+ Raises:
+     RuntimeError: If an error occurs during setup, data fetching, or file writing.
+ 
+ Notes:
+     - The function automatically adjusts settings based on the connected camera's configuration.
+     - It prepares the camera for image mode (if necessary) and sets the acquisition mode.
+     - The function assumes a zigzag scanning pattern, with the option for backward scanning.
+     - Data is fetched from the Andor camera, processed, and saved in a 3D file format.
+ """
+        s_time=time.perf_counter()
+        bw_fact = 2 if backward else 1
+
+        # Retrieve scan frame and set default dimensions if not provided
+        SF = self.connect.ScanFrameGet()
+        dim = (1e9 * SF.values[2][0], 1e9 * SF.values[3][0]) if dim is None else dim
+        cx, cy, angle = SF.values[0][0], SF.values[1][0], SF.values[4][0]
+        
+        # Initial setup for the first point in the bottom-left corner
+        initial_dx_nm, initial_dy_nm = (-dim[0] / 2, -dim[1] / 2 + (dim[1] / pix[1])/2) if direction == "up" else (-dim[0] / 2, dim[1] / 2 - (dim[1] / pix[1])/2)
+        initial_dx_rot, initial_dy_rot = self.rotate(initial_dx_nm, initial_dy_nm, angle)
+        
+        # Move to the first point
+        self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
+        # Check if tip recorder window has been opened Scan Control\Follow Me\Show Graph
+        try:
+            _, data_check = self.connect.TipRecDataGet()
+        except Exception:
+            print("TipRec module not ready. Open the module before scanning under Scan Control->Follow Me->Show Graph")
+            return
+
+        if signal_names is None:
+            signal_names = [
+                "Bias (V)", "Z (m)", "Current (A)", 
+                "LI Demod 1 Y (A)", "LI Demod 2 Y (A)", "Counter 1 (Hz)"
+            ]
+        # Filter rows in `signals_slots` where the first column matches any item in `signal_names`
+
+        if self.connect.version<13000:
+            signals_slots=self.connect.SignalsInSlotsGet(prt=False)
+            signals =signals_slots.iloc[:, 0].tolist()
+        else:
+            signals =self.signal_names.iloc[:, 0].tolist()
+        # Get matching indices and signals in the order based on signals
+        matching_indices = [i for i, signal in enumerate(signals) if signal in signal_names]
+        matching_signals = [signals[i] for i in matching_indices]
+        
+        # Get unmatched items
+        unmatched_items = [item for item in signal_names if item not in signals]
+        print(f'Signals {unmatched_items} not in slots')
+        # define the channels recorded
+        scan_buffer=self.connect.ScanBufferGet()
+        num_chs, ch_idx, pxs, lines = scan_buffer.iloc[:, 0]
+        self.connect.ScanBufferSet(len(matching_indices),matching_indices,pxs, lines) 
+        bias_index = matching_signals.index("Bias (V)")
+             
+
+        # set bw and fw move speed 
+        mv_spd=1e-9*(dim[0]/(acqtime*pix[0]))
+        bw_ratio=(min(bw_ratio, 100*1e-9/mv_spd)) #limit bw_spped to max 100 nm/s
+        # define the Tip Rec parameters 
+        pppix, ovs, num_points = self.calculate_parameters(acqtime, pix, backward)
+        self.connect.FolMeOversamplSet(ovs,prt=False)
+        self.connect.TipRecBufferSizeSet(200000,prt=False)
+        self.connect.TipRecBufferClear()
+        self.connect.FolMeSpeedSet(mv_spd,1)
+        
+        # Set scan direction parameters
+        row_range = range(2 * pix[1])
+        dy_sign = -1 if direction == "up" else 1
+        dy_plus=0
+        
+        # Create the signal_array with NaN values
+        signal_array=np.full((len(row_range),pix[0],len(matching_indices)), np.nan, dtype=np.float32)
+
+        # Start zigzag pattern)
+        g1_time,g2_time=0,0
+
+        sweep_signal = "Wavelength (nm)"  # Sweep signal as string
+
+        # --- MAIN FUNCTION --- # header writing
+        folder = self.connect.UtilSessionPathGet().loc['Session path', 0]
+        filename_3ds = self.connect.get_next_filename("G"+name, extension='.3ds', folder=folder)
+        
+        bias_voltage = self.connect.BiasGet().iloc[0, 0]
+        grid_settings = np.array([cx, cy, 1e-9*dim[0], 1e-9*dim[1], angle])
+        start_time = datetime.now().strftime('%d.%m.%Y %H:%M:%S.%f')[:-3]
+        
+        # === common header ===
+        header = f'''End time="{start_time}"
+        Start time="{start_time}"
+        Delay before measuring (s)=0
+        Comment=
+        Bias (V)={bias_voltage:.6E}
+        Experiment=Experiment
+        Date="{start_time.split()[0]}"
+        User={user}
+        Grid dim="{pix[0]} x {pix[1]}"
+        Grid settings={";".join([f"{val:.6E}" for val in grid_settings])}
+        '''
+        
+        # === sweep/fixed header ===
+        fixed_parameters = ["Sweep Start", "Sweep End"] + matching_signals
+        
+        # --- Calculate the correct experiment size ---
+        #len_data = 128  # As requested, one channel with 10 points
+        num_params = len(fixed_parameters)
+        # Size = (number of parameter values + number of data points) * 4 bytes/value
+        experiment_size_bytes = (len_data) * 4
+
+        param_header = f'Sweep Signal="{sweep_signal}"\r\n' \
+               f'Fixed parameters="{";".join(fixed_parameters)}"\r\n' \
+               f'Experiment parameters=\r\n' \
+               f'# Parameters (4 byte)={num_params}\r\n' \
+               f'Experiment size (bytes)={experiment_size_bytes}\r\n' \
+               f'Points={len_data}\r\n' \
+               f'Channels=Counts\r\n' \
+               f':HEADER_END:\r\n'
+        
+        # --- forward file ---
+        f = open(filename_3ds, 'wb')
+        f.write(header.encode())
+        f.write(param_header.encode())
+        
+        # --- backward file (if needed) ---
+        f_bw = None
+        if backward:
+            filename_3ds_bw = filename_3ds.replace(name, f"{name}_bw")
+            f_bw = open(filename_3ds_bw, 'wb')
+            f_bw.write(header.encode())
+            f_bw.write(param_header.encode()) 
+        """
+        if ds3: # no fetch thread, we’ll write directly after each line
+            #start 3ds loop fo processing
+            fetch_queue = Queue()  # Create a queue 
+            delta = 0.05  # time delay between pixels, adjust if needed
+            if backward==True:
+                fetch_thread = threading.Thread(target=self.fetch_data_from_queue_nanonis, args=(backward, f, matching_signals, signal_array, fetch_queue, delta, f_bw))
+            else:
+                fetch_thread = threading.Thread(target=self.fetch_data_from_queue_nanonis, args=(backward, f, matching_signals, signal_array, fetch_queue, delta))
+            fetch_thread.start()  # Start the fetch thread
+        """
+
+        try:
+            counter=0
+            if feedfw==True:
+                prev_fw_bias_profile = None
+                prev_bw_bias_profile = None
+                time_line=None
+                #ff_factor = 10  # first line is 10x slower
+                ff_stop_event = None
+
+                # define the Tip Rec parameters 
+                pppix_slow, ovs_slow, num_points_slow = self.calculate_parameters(acqtime*ff_factor, pix, backward)
+                self.connect.FolMeOversamplSet(ovs_slow,prt=False)
+                #self.connect.TipRecBufferSizeSet(200000,prt=False)
+                
+            for index, row in enumerate(row_range):                    
+            # You can now use 'index' to access signal_array
+                # Calculate y-coordinate for the current row
+                if row % 2 == 0 and row!=0:
+                    dy_plus+=(dim[1] / pix[1]) * (-dy_sign)
+                    
+                dy_nm=initial_dy_nm+dy_plus
+            
+                # Determine end x-coordinate based on row direction
+                end_dx_nm = dim[0] / 2 if row % 2 == 0 else -dim[0] / 2
+            
+                # Rotate the end coordinates and move to the end point of the current row
+                end_dx_rot, end_dy_rot = self.rotate(end_dx_nm, dy_nm, angle)
+    
+                # Start move and wait for completion
+                
+                if backward==False:
+
+                    if row % 2 == 0 and row!=0: 
+                        dx_n_rot,dy_n_rot=self.rotate(-end_dx_nm,dy_nm, angle)
+                        self.connect.FolMeXYPosSet(cx + dx_n_rot, cy + dy_n_rot, True) # move one pixel up after finishing fw bw line
+                        self.connect.FolMeSpeedSet(mv_spd,1)
+                        self.connect.TipRecBufferClear()
+                        #reset the buffer to original
+                        if feedfw:
+                            self.connect.FolMeOversamplSet(ovs,prt=False)
+                            #self.connect.TipRecBufferSizeSet(200000,prt=False)
+                        # --- Start feedforward for this forward line ---
+                        if feedfw and prev_fw_bias_profile is not None:
+                            line_duration = (dim[0] * 1e-9) / mv_spd  # time for full forward line
+                            if time_line is not None:
+                                line_duration = time_line
+                            ff_stop_event = threading.Event()
+                            # start feedforward thread - bias_thread
+                            bias_thread = threading.Thread(
+                                target=self.bias_playback_worker,
+                                args=(prev_fw_bias_profile, line_duration, ff_stop_event),
+                                kwargs={'update_rate_local': 50, 'smooth_local': False},
+                            )
+                            bias_thread.start()
+                     
+                     # --- FEEDFORWARD for first forward line ---
+                    if feedfw and row == 0:
+                        self.connect.FolMeSpeedSet(mv_spd / ff_factor, 1)
+                        if fftest:
+                            ff_stop_event = threading.Event()
+                            test_thread = threading.Thread(
+                                target=self.bias_test_worker,
+                                args=(dim[0]*1e-9/(mv_spd/ ff_factor), ff_stop_event),
+                                kwargs={'center_bias': bias_voltage, 'amplitude': 0.05, 'period': 2.0}
+                            )
+                            test_thread.start()
+                    mv_time=time.perf_counter()
+                    self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True)  #regular scan move
+                    
+                    if row % 2 == 0 and row!=0:
+                        time_line = time.perf_counter() - mv_time 
+                        print(f"{time_line:.4f} elapsed move time {(dim[0] * 1e-9) / mv_spd:.4f} line duration")
+                    
+                    if fftest and feedfw and row == 0 and ff_stop_event is not None: #stop test thread 
+                        ff_stop_event.set()
+                        test_thread.join()
+                        
+                    if row % 2 == 0: # stop feedfw thread 
+                        if feedfw and row != 0 and prev_fw_bias_profile is not None:
+                            ff_stop_event.set()
+                            bias_thread.join()
+                            
+                        _,data=self.connect.TipRecDataGet()   # save data containing only fw  shape of 'data': (num_channels, buffer_length)
+                        #print(data.shape,"shape of the data from tiprec")
+                        temp_data = self.bin_average_stacked(data,pix[0]) # analyse to fw and bw movement and make avarage of pixels
+                        signal_array[index,:,:], signal_array[index + 1,:,:] = temp_data, temp_data[::-1,:] # write first fw an later fw reversed
+                        self.connect.FolMeSpeedSet(bw_ratio*mv_spd,1)
+                        # write forward line directly
+                        if ds3:
+                            self.write_nanonis_3ds_line(temp_data, len_data, f)
+                            
+                        if feedfw:
+                            # Extract and store the bias profile of the first line
+                            try:
+                                bias_index = matching_signals.index("Bias (V)")
+                                prev_fw_bias_profile = data[bias_index, :].copy()
+                                print(prev_fw_bias_profile.shape,"shape of the data bias to be plotted")
+                                
+                                    # --- Plot immediately for first line ---
+                                if row == 0:
+                                    if plotting==True:
+                                        import matplotlib.pyplot as plt
+                                        plt.figure(figsize=(6,3))
+                                        plt.plot(prev_fw_bias_profile, '-o', markersize=3)
+                                        plt.title("First Line Bias Profile")
+                                        plt.xlabel("Pixel index")
+                                        plt.ylabel("Bias (V)")
+                                        plt.grid(True)
+                                        plt.show(block=False)  # non-blocking so scan continues
+                                        plt.pause(0.01)        # ensure it renders
+                            except ValueError:
+                                print("[feedfw] Bias (V) not found in matching_signals — feedforward skipped.")
+                                prev_fw_bias_profile = None
+                    
+                else:
+                    
+                    if ds3==True and row ==0:   #for row 0 start the acquisition; starts andor kinetic series acquisition and waits for TTL pulse from andor
+                        pass
+                            
+                    if row % 2 == 0 and row!=0:
+                        dx_n_rot,dy_n_rot=self.rotate(-end_dx_nm,dy_nm, angle)
+                        self.connect.FolMeXYPosSet(cx + dx_n_rot, cy + dy_n_rot, True) # move one pixel up after finishing fw bw line
+                        self.connect.TipRecBufferClear()
+                        
+                    self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, True) #regular scan move
+        
+                    if row % 2 == 1:
+                        _,data=self.connect.TipRecDataGet()   # save data containing fw and bw
+                        temp_data = self.bin_average_stacked(data,2 * pix[0]) # analyse to fw and bw movement and make avarage of pixels
+                    #    print(data.shape,temp_data[pix[0]:, :].shape,index-1,index)
+                        signal_array[index - 1,:,:], signal_array[index,:,:] = temp_data[:pix[0], :], temp_data[pix[0]:, :] # write first fw an later bw
+                        fw_line = temp_data[:pix[0], :]
+                        bw_line = temp_data[pix[0]:, :]
+                
+                        # write fw to fw file
+                        if ds3:
+                            self.write_nanonis_3ds_line(fw_line, len_data, f)
+                
+                        # write bw to bw file (flipped to left→right convention)
+                        if ds3 and f_bw is not None:
+                            self.write_nanonis_3ds_line(bw_line[::-1, :], len_data, f_bw)
+                        
+                counter+=pix[0]        
+                elapsed = time.perf_counter() - s_time
+                remaining = (elapsed / counter) * (math.prod(pix)*2 - counter)
+                sys.stdout.write(f"\rExecuted {int(counter*bw_fact/2)}/{math.prod(pix)*bw_fact} | Remaining: {int(remaining // 60):02d}:{int(remaining % 60):02d}") #(column+1+pix[0]*row)*
+                sys.stdout.flush()
+                      
+        except KeyboardInterrupt:
+            pass
+            
+        finally:
+        
+            end_time_scan = time.perf_counter()
+            elapsed_time_scan="{:.1f}".format(end_time_scan-s_time)
+            
+            end_time = datetime.now().strftime('%d.%m.%Y %H:%M:%S.%f')[:-3]
+            end_time_line = f'End time="{end_time}" \n'
+            end_time_line = end_time_line.ljust(len(header.splitlines()[0]) + 1)
+            
+            # Seek to the beginning and overwrite the first line
+            f.seek(0)
+            f.write(end_time_line.encode())
+            f.close()
+            if backward==True:
+                # Seek to the beginning and overwrite the first line
+                f_bw.seek(0)
+                f_bw.write(end_time_line.encode())
+                f_bw.close()
+            filename_sxm = self.connect.get_next_filename("M"+name,extension='.sxm',folder=folder)
+           ### settings_dict=(dict(zip(settings.T.iloc[0], settings.T.iloc[1].astype(str))))
+            scan_par = {
+                "REC_DATE": datetime.now().strftime('%d.%m.%Y'),
+                "REC_TIME":  datetime.now().strftime('%H:%M:%S'),
+                "ACQ_TIME": str(elapsed_time_scan),
+                "SCAN_PIXELS": f"{pix[0]}\t{pix[1]}",
+                "SCAN_FILE": filename_sxm,
+                "SCAN_TIME": f"{acqtime*pix[0]:.6E}\t{acqtime*pix[0]:.6E}",
+                "SCAN_RANGE": f"{1e-9 * dim[0]:.6E}\t{1e-9 * dim[1]:.6E}",
+                "SCAN_OFFSET": f"{cx:.6E}\t{cy:.6E}",
+                "SCAN_ANGLE": str(angle),
+                "SCAN_DIR": direction,
+                "BIAS": str(bias_voltage)
+                }   
+            settings_dict={}
+            nanonis_chan_names=matching_signals                
+            
+            if backward==True:
+                combined_data =signal_array.transpose(2, 0, 1).reshape(signal_array.shape[2], -1)
+            else:
+                combined_data =signal_array[::2,:,:].transpose(2, 0, 1).reshape(signal_array.shape[2], -1)
+            
+                        # Define constants
+            scan_dir = 'both'
+            default_value1 = '1.000E+0'
+            default_value2 = '0.000E+0'
+            
+            # Initialize lists to store the final output
+            final_list = []
+            
+            # Process nanonis_chan_names
+            for i, name in enumerate(nanonis_chan_names, start=1):
+                base_name, unit = name.split(' (')
+                unit = unit.strip(')')
+                final_list.append([i, f'{base_name}_avg.', unit, scan_dir, default_value1, default_value2])
+
+            data_sxm=self.connect.writesxm(backward,filename_sxm, settings_dict, scan_par, final_list, combined_data)
+
+        # reset speed and recorded channels in scan window to the original value before the map acquisition
+        self.connect.FolMeSpeedSet(mv_spd,0)
+        self.connect.ScanBufferSet(*scan_buffer.iloc[:, 0].values)
+        #return(np.stack(signal_array,axis=0))
+        e_time=time.perf_counter()
+        print("tot time", "{:.5f}".format(e_time-s_time))
+        
+        return(signal_array)
+  
     def fw_bw_map_chatGPT(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None, savedat=False, direction="up", backward=False, readmode=0):       
         def bin_average_stacked(array, n):
             """Average rows of an array in bins of size n."""
@@ -2975,7 +3518,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
         ovs = max(1, min(2E4 / (20 / acqtime), 1000))
         num_points = int(2E4 / ovs * acqtime * pix[0] + 200)
         self.connect.FolMeOversamplSet(ovs, prt=False)
-        self.connect.TipRecBufferSizeSet(num_points, prt=False)
+        self.connect.TipRecBufferSizeSet(200000, prt=False)
         self.connect.TipRecBufferClear()
         self.connect.FolMeSpeedSet(mv_spd, 1)
         
@@ -3099,9 +3642,8 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
         
                 # Move to end point of the current row
                 print(f"Downward scan - Moving to end point (dx_nm: {end_dx_nm}, dy_nm: {dy_nm})")
-                self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, wait_num) 
+                self.connect.FolMeXYPosSet(cx + end_dx_rot, cy + end_dy_rot, wait_num)            
 
-                
     def nanonis_map(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,savedat=False,direction="up"):
         # Initialize variables
 
