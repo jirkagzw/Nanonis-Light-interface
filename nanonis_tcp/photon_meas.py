@@ -3908,7 +3908,7 @@ Channels=Integer
                 bias_par[key] = bias_par[key].infer_objects(copy=False)
         return bias_par
 
-    def bias_spectr(self, par, data_folder, basename = '%Y%m%d_', run = True):
+    def bias_spectr_old(self, par, data_folder, basename = '%Y%m%d_', run = True):
         self.connect.BiasSpectrOpen()
         props = (int(par['BiasSpectrProps'].loc['Save all', 0]),
                  int(par['BiasSpectrProps'].loc['Number of sweeps',0]),
@@ -3940,6 +3940,82 @@ Channels=Integer
             data, parameters = self.connect.BiasSpectrStart(1, basename)
             self.connect.LockInModOnOffSet(1, 0)
             self.connect.UtilSessionPathSet(sess_path, 0)
+            return data, parameters
+        
+    def bias_spectr(self, par, data_folder, basename="BS", run=True):
+        """
+        Configure and (optionally) run a Bias Spectroscopy measurement.
+    
+        This version adds robust checking of the BiasSpectr channels: 
+        it compares the currently set channel list with the one in `par['BiasSpectrChs']`
+        and only updates if needed, avoiding pandas elementwise comparison warnings.
+        """
+    
+        self.connect.BiasSpectrOpen()
+    
+        # --- prepare Bias Spectroscopy parameters ---
+        props = (
+            int(par['BiasSpectrProps'].loc['Save all', 0]),
+            int(par['BiasSpectrProps'].loc['Number of sweeps', 0]),
+            par['BiasSpectrProps'].loc['Backward sweep', 0],
+            int(par['BiasSpectrProps'].loc['Number of points', 0]),
+            float(par['BiasSpectrTiming'].loc['Z offset (m)', 0]),
+            par['BiasSpectrMore'].loc['Auto save', 0],
+            par['BiasSpectrMore'].loc['Save dialog', 0]
+        )
+    
+        # --- set Bias (V) ---
+        self.connect.BiasSet(*par['Bias'].values)
+    
+        # --- check and set BiasSpectr channels ---
+        try:
+            # get currently active channel configuration
+            chs_df = self.connect.BiasSpectrChsGet(prt=False)
+            curr_str = str(chs_df.loc['Channel indexes', 0]).strip()
+            curr_idx = [int(s) for s in curr_str.replace(' ', '').split(',') if s.isdigit()]
+        except Exception as e:
+            print(f"Warning: could not read current BiasSpectrChs ({e}), assuming mismatch.")
+            curr_idx = []
+    
+        # desired channels from parameter file
+        try:
+            new_str = str(par['BiasSpectrChs'].iloc[0]).strip() if hasattr(par['BiasSpectrChs'], 'iloc') else str(par['BiasSpectrChs']).strip()
+            new_idx = [int(s) for s in new_str.replace(' ', '').split(',') if s.isdigit()]
+        except Exception as e:
+            raise ValueError(f"Error parsing BiasSpectrChs from parameter file: {e}")
+    
+        # compare and update if needed
+        if curr_idx == new_idx:
+            #print(f"BiasSpectr channels already match → {curr_idx}")
+            pass
+        else:
+            print(f"Updating BiasSpectr channels: {curr_idx} → {new_idx}")
+            self.connect.BiasSpectrChsSet(len(new_idx), new_idx)
+    
+        # --- apply all spectroscopy parameters ---
+        self.connect.BiasSpectrPropsSet(*props)
+        self.connect.BiasSpectrAdvPropsSet(*par['BiasSpectrAdvProps'].values)
+        self.connect.BiasSpectrLimitsSet(*par['BiasSpectrLimits'].values)
+        self.connect.BiasSpectrTimingSet(*par['BiasSpectrTiming'].values)
+        # self.connect.BiasSpectrTTLSyncSet(*par['BiasSpectrTTLSync'].values)
+        self.connect.BiasSpectrAltZCtrlSet(*par['BiasSpectrAltZCtrl'].values)
+        #self.connect.BiasSpectrMLSLockinPerSegSet(*par['BiasSpectrMLSLockinPerSeg'].values)
+        #self.connect.BiasSpectrMLSModeSet(*par['BiasSpectrMLSMode'].values)
+        #self.connect.BiasSpectrMLSValsSet(*par['BiasSpectrMLSVals'].values)
+    
+        # --- Lock-in parameters ---
+        self.connect.LockInModAmpSet(*par['LockInModAmp1'].values)
+        #self.connect.LockInModPhasFreqSet(*par['LockInModFreq1'].values)
+    
+        # --- optional measurement run ---
+        if run:
+            self.connect.LockInModOnOffSet(*par['LockInOnOff1'].values)
+            #sess_path = self.connect.UtilSessionPathGet().loc['Session path', 0]
+            #bias_spectr_path = self.check_dirs(sess_path + '\\' + data_folder)
+            #self.connect.UtilSessionPathSet(bias_spectr_path, 0)
+            data, parameters = self.connect.BiasSpectrStart(1, basename)
+            self.connect.LockInModOnOffSet(1, 0)
+            #self.connect.UtilSessionPathSet(sess_path, 0)
             return data, parameters
         
     ##################################### PICK UP ATOMS ##################################    
