@@ -1216,7 +1216,7 @@ class photon_meas:
                         
         return data, sigvals2  
 
-    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None,readmode=0):# spectrum with only saving the relevant channels and using np array to store nanonis data
+    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None,readmode=0,extra_header=None):# spectrum with only saving the relevant channels and using np array to store nanonis data
         name="AA"+name
         # Initialize variables
         self.connect2.acqtime_set(acqtime)
@@ -1225,7 +1225,9 @@ class photon_meas:
         settings = self.andor_settings #
         signal_names_df=self.signal_names 
         relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
-        
+
+        if extra_header is None:
+            extra_header = {}
         nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
         nanonis_array = np.full(nanonis_shape,np.nan, dtype=np.float64)
         #andor_array = np.full(andor_shape,np.nan, dtype=np.int64)
@@ -1343,7 +1345,13 @@ class photon_meas:
                 # Write the formatted DataFrame
                 combined_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")
                 settings_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n") # Write additional settings
-                
+                if extra_header:
+                    extra_header_df = pd.DataFrame(
+                        [(str(k), v) for k, v in extra_header.items()],
+                        columns=["Signal names", "Value"])
+                    extra_header_df = extra_header_df.applymap(
+                        lambda x: '{:.7E}'.format(x) if isinstance(x, (float, np.floating)) else x)
+                    extra_header_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")                
                 # Write section header and additional data
                 f.write("\n[DATA]\n")
                 data_df.to_csv(f, sep='\t', header=True, index=False, lineterminator="\n")  
