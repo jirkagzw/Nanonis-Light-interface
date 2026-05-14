@@ -2672,9 +2672,10 @@ Channels=Counts
         self.connect.FolMeXYPosSet(cx + initial_dx_rot, cy + initial_dy_rot,True)
         # Check if tip recorder window has been opened Scan Control\Follow Me\Show Graph
         try:
-            _, data_check = self.connect.TipRecDataGet()
+            self.connect.TipRecBufferSizeGet()
+            self.connect.TipRecBufferClear()
         except Exception:
-            print("TipRec module not ready. Open the module before scanning under Scan Control->Follow Me->Show Graph")
+            print("TipRec module not ready. Open Scan Control -> Follow Me -> Show Graph")
             return
 
         if signal_names is None:
