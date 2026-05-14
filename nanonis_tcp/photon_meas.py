@@ -2624,30 +2624,40 @@ Channels=Counts
         #first try communication with andor
         try:
             self.connect2.acqtime_set(acqtime)
-            settings=self.connect2.settings_get()
-            andor=True
+            settings = self.connect2.settings_get()
+            andor = True
+        
             for index, row in settings.iterrows():
                 code = row['Code']
-                value = int(row['Value'])
-                if code == 'GRM' and (value == 4 or readmode not in [0, "FVB"]):
-                    print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
-                    self.connect2.readmode_set(readmode)
-                elif code == 'GAM' and value != 3:
-                    print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
-                    self.connect2.acqmode_set(3)
+                value_raw = row['Value']
+        
+                if code == 'GRM':
+                    value = int(value_raw)
+                    if value == 4 or readmode not in [0, "FVB"]:
+                        print(f"Camera in image mode!: GRM with value {value}, setting it to FVB mode.")
+                        self.connect2.readmode_set(readmode)
+        
+                elif code == 'GAM':
+                    value = int(value_raw)
+                    if value != 3:
+                        print(f"Acq. mode with value {value} invalid, setting it to kinetic (3) mode.")
+                        self.connect2.acqmode_set(3)
+        
                 elif code == 'GKT':
-                    acqtime=float(value)
-    
-            self.connect2.tcp.cmd_send(f"SKN {pix[0]*bw_fact}") #make it a function
-            response_and = self.connect2.tcp.recv_until() 
+                    acqtime = float(value_raw)
+                    print("Andor confirmed acqtime:", acqtime)
+        
+            self.connect2.tcp.cmd_send(f"SKN {pix[0] * bw_fact}")  # kinetic series length
+            response_and = self.connect2.tcp.recv_until()
+        
             self.connect2.tcp.cmd_send("AQP")
             response_and = self.connect2.tcp.recv_until()
-            settings=self.connect2.settings_get()
+            settings = self.connect2.settings_get()
+
         except Exception as e:
-            #raise RuntimeError(f"An error occurred: {e}")  # Error handling
             print(e)
-            andor=False
-            settings=[]
+            andor = False
+            settings = []
         print("andor",andor)
         # Retrieve scan frame and set default dimensions if not provided
         SF = self.connect.ScanFrameGet()
