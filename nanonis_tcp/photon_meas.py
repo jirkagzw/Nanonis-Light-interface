@@ -2583,7 +2583,7 @@ Channels=Counts
                 fetch_queue.task_done()  # Mark the task as done
                 i+=1
     
-    def photon_map_k(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,direction="up",backward=False,bw_ratio=10,readmode=0,wait_time=None):     
+    def photon_map_k(self, acqtime=10, acqnum=1, pix=(10, 10), dim=None, name="LS-man", user="Jirka", signal_names=None,direction="up",backward=False,bw_ratio=10,readmode=0,wait_time=None,num_points=100000):     
         """
  Perform a photon mapping scan for a given experimental setup.
 
@@ -2605,6 +2605,7 @@ Channels=Counts
      bw_ratio (float): Ratio to adjust the backward scan speed. Default is 10.
      readmode (int): Mode for the camera acquisition. Default is 0.
      wait_time (float, optional): Time in seconds to wait before starting the next acquisition. Default is None.
+     num_points(integer,optional): number of points: default 100k allows ~25 min per line in forward only and 12.5 min in fw-bw mode
 
  Returns:
      None: The function doesn't return any value but writes the scanned data to a file.
@@ -2694,9 +2695,9 @@ Channels=Counts
         mv_spd=1e-9*(dim[0]/(acqtime*pix[0]))
         bw_ratio=(min(bw_ratio, 100*1e-9/mv_spd)) #limit bw_spped to max 100 nm/s
         # define the Tip Rec parameters 
-        pppix, ovs, num_points = self.calculate_parameters(acqtime, pix, backward)
+        pppix, ovs, num_points_calc = self.calculate_parameters(acqtime, pix, backward)
         self.connect.FolMeOversamplSet(ovs,prt=False)
-        self.connect.TipRecBufferSizeSet(num_points,prt=False)
+        self.connect.TipRecBufferSizeSet(int(num_points),prt=False)
         self.connect.TipRecBufferClear()
         self.connect.FolMeSpeedSet(mv_spd,1)
         
