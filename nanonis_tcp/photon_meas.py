@@ -23,11 +23,12 @@ from scipy.interpolate import interp1d
 
 @apply_logging
 class photon_meas:
-    def __init__(self, connect,connect2=None, connect3=None, logging=True): #connect2 = andor
+    def __init__(self, connect,connect2=None, connect3=None, logging=True,dig_port=2 ): #connect2 = andor 
         self.connect = connect
         self.connect2=connect2
         self.connect3=connect3
         self.logging_enabled = logging
+        self.dig_port = dig_port #digital port on nanonis RT controller receiving fire from CCD for photon_map_k A-0,B-1,C-2,D-3
         try:
             session_path = self.connect.UtilSessionPathGet().loc['Session path', 0]
             init_logger(session_path)
@@ -2445,7 +2446,9 @@ Channels=Counts
             finally:
                 fetch_queue.task_done()  # Mark the task as done
                 
-    def andor_thread_open(self,port=2,index=0,wait_time=None):
+    def andor_thread_open(self,port=None,index=0,wait_time=None):
+        if port is None:
+            port = self.dig_port
         andor_thread=threading.Thread(target=self.connect2.kinser_start)
         andor_thread.start()
         if wait_time==None:
