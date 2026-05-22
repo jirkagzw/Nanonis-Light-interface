@@ -1143,7 +1143,7 @@ class photon_meas:
             data_df = data
             
             # Format the DataFrame in one go
-            combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+            combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
@@ -1339,7 +1339,7 @@ class photon_meas:
             data_df = data
             
             # Format the DataFrame in one go
-            combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+            combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
@@ -1350,7 +1350,7 @@ class photon_meas:
                     extra_header_df = pd.DataFrame(
                         [(str(k), v) for k, v in extra_header.items()],
                         columns=["Signal names", "Value"])
-                    extra_header_df = extra_header_df.applymap(
+                    extra_header_df = extra_header_df.map(
                         lambda x: '{:.7E}'.format(x) if isinstance(x, (float, np.floating)) else x)
                     extra_header_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")                
                 # Write section header and additional data
@@ -1538,7 +1538,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
 
                         
                         # Format the DataFrame in one go
-                        combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+                        combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
                         
                         # Write all data to a file in one go
                         with open(filename, 'w') as f_text:
@@ -1843,7 +1843,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
 
                         
                         # Format the DataFrame in one go
-                        combined_df = combined_df.applymap(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+                        combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
                         
                         # Write all data to a file in one go
                         with open(filename, 'w') as f_text:
