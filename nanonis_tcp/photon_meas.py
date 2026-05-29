@@ -2648,6 +2648,7 @@ Channels=Counts
         bw_fact = 2 if backward else 1
         #first try communication with andor
         try:
+            self.connect2.acqmode_set(3)
             self.connect2.acqtime_set(acqtime)
             settings = self.connect2.settings_get()
             andor = True
