@@ -2555,30 +2555,52 @@ Channels=Counts
                 if data.size % n != 0: raise ValueError("Invalid data size")
                 
                 if backward:  # Case for backward==True
-                    # Split the data into two halves
+                    # data contains one full forward line + one full backward line
                     half_size = data.size // 2
-                    andor_array[2*i, :, :] = data[:half_size].reshape(half_size // n, n)  # First half
-                    andor_array[2*i+1, :, :] = data[half_size:].reshape(half_size // n, n)  # Second half
-                    for j in range(signal_array.shape[1]-1,-1):
-                        nanonis_data_bw = np.array([float(calib[0]), float(calib[-1])] + list(signal_array[2*i, j, :]))
-                        andor_data_bw = andor_array[2*i+1, j, :]
-                        
-                        # Convert to the correct dtype and write to file
+                
+                    fw = data[:half_size].reshape(half_size // n, n)
+                    bw = data[half_size:].reshape(half_size // n, n)
+                
+                    andor_array[2*i, :, :] = fw
+                    andor_array[2*i + 1, :, :] = bw
+                
+                    # Write forward .3ds
+                    for j in range(signal_array.shape[1]):
+                        nanonis_data_fw = np.array(
+                            [float(calib[0]), float(calib[-1])] +
+                            list(signal_array[2*i, j, :])
+                        )
+                        andor_data_fw = andor_array[2*i, j, :]
+                
+                        nanonis_data_fw.astype(">f4").tofile(file)
+                        andor_data_fw.astype(">f4").tofile(file)
+                
+                    # Write backward .3ds
+                    # Reverse j so the saved backward image has normal left-to-right order.
+                    for j in range(signal_array.shape[1] - 1, -1, -1):
+                        nanonis_data_bw = np.array(
+                            [float(calib[0]), float(calib[-1])] +
+                            list(signal_array[2*i + 1, j, :])
+                        )
+                        andor_data_bw = andor_array[2*i + 1, j, :]
+                
                         nanonis_data_bw.astype(">f4").tofile(file_bw)
                         andor_data_bw.astype(">f4").tofile(file_bw)
-                    
-                else:  # Case for backward == False
-                    andor_array[i, :, :] = data.reshape(data.size // n, n)  # Reshape and assign
-                    
-                for j in range(signal_array.shape[1]):
-                    # Construct arrays of nanonis data (with start and end wavelength) and andor data 
-                    nanonis_data = np.array([float(calib[0]), float(calib[-1])] + list(signal_array[2*i, j, :]))
-                    andor_data = andor_array[bw_fact*i, j, :]
-                    
-                    # Convert to the correct dtype and write to file
-                    nanonis_data.astype(">f4").tofile(file)
-                    andor_data.astype(">f4").tofile(file)
                 
+                else:
+                    andor_array[i, :, :] = data.reshape(data.size // n, n)
+                
+                    # Write normal forward-only .3ds
+                    for j in range(signal_array.shape[1]):
+                        nanonis_data = np.array(
+                            [float(calib[0]), float(calib[-1])] +
+                            list(signal_array[2*i, j, :])
+                        )
+                        andor_data = andor_array[i, j, :]
+                
+                        nanonis_data.astype(">f4").tofile(file)
+                        andor_data.astype(">f4").tofile(file)
+                                
             except Exception as e:
                 raise RuntimeError(f"An error occurred: {e}")  # Error handling
                 
