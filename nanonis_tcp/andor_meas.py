@@ -3,6 +3,9 @@
 Created on Wed Aug 28 14:54:20 2024
 
 @author: jirka
+
+Updated: use tcp.cmd_query() to avoid reading the initial OK CON banner and to
+avoid manual double termination characters.
 """
 
 import pickle
@@ -12,54 +15,70 @@ from os.path import exists
 import time
 import numpy as np
 from .log_utils import apply_logging, init_logger
+
+
 @apply_logging
 class andor_meas:
     # Class variables
-    # To change the value of class variable in your script, use this: 
-    #   import andor_measnanonis_tcp as tcp
+    # To change the value of class variable in your script, use this:
+    #   import nanonis_tcp as tcp
     #   tcp.andor_meas.if_print = True
     if_print = False
+
     def __init__(self, tcp):
         self.tcp = tcp
         # self.f_print = False
-        
         return
-    
+
+    def _query(self, cmd, slow=False):
+        """
+        Internal helper.
+
+        Uses tcp.cmd_query() if available. Falls back to the old send/receive
+        style for compatibility with older tcp_andor_ctrl versions.
+        """
+        if hasattr(self.tcp, 'cmd_query_slow') and slow:
+            return self.tcp.cmd_query_slow(cmd)
+        if hasattr(self.tcp, 'cmd_query'):
+            return self.tcp.cmd_query(cmd)
+
+        # Fallback for older tcp_andor_ctrl.py
+        self.tcp.cmd_send(cmd)
+        return self.tcp.recv_until()
+
     def wl_set(self, wl, prt=if_print):
         """
-        Sets the center wavelength of a current grating on spectrograph to the specified value..
+        Sets the center wavelength of current grating on spectrograph to the
+        specified value.
 
         Parameters:
-            wavelength (float): The center wavelength to set (in nm). 0 means zeroth order reflection.
+            wl (float): Center wavelength in nm. 0 means zeroth order reflection.
             prt (bool): Whether to print the output (default is `if_print`).
 
         Raises:
-            ValueError: If the wavelength is below zero .
+            ValueError: If the wavelength is below zero.
 
         Returns:
             response from Andor
         """
-        if wl< 0:
-            body="{:.5f}".format(0)
-            raise ValueError('The minimum allowed wavelength is 0 (zeroth order reflection). Please check your input! Center wavelength has been set to zero')    
-        
-        body="{:.5f}".format(wl)
+        if wl < 0:
+            raise ValueError('The minimum allowed wavelength is 0 (zeroth order reflection). Please check your input!')
+
+        body = "{:.5f}".format(wl)
         header = 'SWL '
-        cmd = header + body + self.tcp.termination_char
+        cmd = header + body
 
-        self.tcp.cmd_send(cmd)
-        result= self.tcp.recv_until()
+        # SWL can take ~20 s. Timeout is controlled by tcp object; with the new
+        # tcp_andor_ctrl default timeout=None this stays infinite/blocking.
+        result = self._query(cmd, slow=True)
 
-     #   self.tcp.print_err(res_err)
-      #  bias_df = pd.DataFrame({'Bias (V)': bias}, index=[0]).T
-        
-        if prt: 
+        if prt:
             print('\n' + result)
-        return result 
-    
+        return result
+
     def grating_set(self, number, prt=if_print):
         """
-        Sets the grating on spectrograph to the specified value.. 
+        Sets the grating on spectrograph to the specified value.
 
         Parameters:
             number (float): The grating number (1 to 4)
@@ -67,80 +86,73 @@ class andor_meas:
             Gr n.2 600 grooves/mm. (500nm blaze) 125 nm range 1 nm resolution
             Gr n.3 600 grooves/mm. (1000nm blaze) 125 nm range 1 nm resolution
             Gr n.4 1200 grooves/mm. (500nm blaze) 60 nm range 0.3 nm resolution
-
             prt (bool): Whether to print the output (default is `if_print`).
 
         Raises:
-            ValueError: If the wavelength is out of range 
+            ValueError: If grating number is out of range
 
         Returns:
             response from Andor
         """
-        if number<1 and number>4:
-            raise ValueError('Only numbers from 1 to 4 are allowed')    
-        else:
-            
-            body="{:.0f}".format(number)
-            header = 'SGR '
-            cmd = header + body +self.tcp.termination_char
-    
-            self.tcp.cmd_send(cmd)
-            result= self.tcp.recv_until()
-        
-            if prt: 
-                print('\n' + result)
-            return result 
-    
+        if number < 1 or number > 4:
+            raise ValueError('Only numbers from 1 to 4 are allowed')
+
+        body = "{:.0f}".format(number)
+        header = 'SGR '
+        cmd = header + body
+
+        result = self._query(cmd)
+
+        if prt:
+            print('\n' + result)
+        return result
+
     def acqtime_set(self, acqtime, prt=if_print):
         """
-        Sets the acquisition time of the camera to the specified value in seconds. 
+        Sets the acquisition time of the camera to the specified value in seconds.
 
         Raises:
-            ValueError: If the time is out of range 
+            ValueError: If the time is out of range
 
         Returns:
             response from Andor
         """
-        if acqtime<=0 and acqtime>300:
-            body="{:.0f}".format(1)
-            raise ValueError('Only >0 and < 300 s are allowed')    
+        if acqtime <= 0 or acqtime > 300:
+            raise ValueError('Only >0 and < 300 s are allowed')
 
-        body="{:.4f}".format(acqtime)
+        body = "{:.4f}".format(acqtime)
         header = 'SET '
-        cmd = header + body +self.tcp.termination_char
+        cmd = header + body
 
-        self.tcp.cmd_send(cmd)
-        result= self.tcp.recv_until()
-        
-        if prt: 
+        result = self._query(cmd)
+
+        if prt:
             print('\n' + result)
-        return result 
-    
+        return result
+
     def acqnum_set(self, acqnum, prt=if_print):
         """
-        Sets the number of acquisitions - always use 1. 
+        Sets the number of acquisitions - always use 1.
 
         Raises:
-            ValueError: If the timenumber of acquisitions is out of range 
+            ValueError: If the number of acquisitions is out of range
 
         Returns:
             response from Andor
         """
-        if acqnum<=0 and acqnum>10:
-            body="{:.0f}".format(1)
-            raise ValueError('Only >0 and < 10 are allowed')    
+        if acqnum <= 0 or acqnum > 10:
+            raise ValueError('Only >0 and < 10 are allowed')
 
-        body="{:.0f}".format(acqnum)
+        body = "{:.0f}".format(acqnum)
         header = 'SAN '
-        cmd = header + body +self.tcp.termination_char
+        cmd = header + body
 
-        self.tcp.cmd_send(cmd)
-        result= self.tcp.recv_until()
-        
-        if prt: 
+        result = self._query(cmd)
+
+        if prt:
             print('\n' + result)
-        return result 
-    
+        return result
+
     def readmode_set(self, mode, prt=if_print):
         """
         Sets the mode of read acquisition:
@@ -148,213 +160,198 @@ class andor_meas:
             1 or "MLT" means Multi-Track,
             2 or "RDT" means Random-Track,
             3 or "SGT" means Single-Track,
-            4 or "IMG" means Image mode (recommended frequency 1 MHz or 2 MHz).
-    
+            4 or "IMG" means Image mode.
+
         Raises:
             ValueError: If the mode is out of range.
-    
+
         Returns:
             Response from Andor.
         """
-        
         if mode in ["FVB", 0]:
             mode = 0
         elif mode in ["MLT", 1]:
             mode = 1
         elif mode in ["RDT", 2]:
-            mode = 2           
+            mode = 2
         elif mode in ["SGT", 3]:
             mode = 3
         elif mode in ["IMG", 4]:
             mode = 4
         else:
-            raise ValueError("Invalid mode. Use 'FVB', 'MLT', 'RDT', 'SGT', 'IMG', or 0, 1, 2, 3, 4.") 
-    
+            raise ValueError("Invalid mode. Use 'FVB', 'MLT', 'RDT', 'SGT', 'IMG', or 0, 1, 2, 3, 4.")
+
         body = "{:.0f}".format(mode)
         header = 'SRM '
-        cmd = header + body + self.tcp.termination_char
-    
-        self.tcp.cmd_send(cmd)
-        result = self.tcp.recv_until()
-        
-        if prt: 
+        cmd = header + body
+
+        result = self._query(cmd)
+
+        if prt:
             print('\n' + result)
         return result
-    
-    
+
     def acqmode_set(self, mode, prt=if_print):
         """
         Sets the mode of acquisition:
             1 or "S" or True means Single Scan,
-            3 or "K" or False means Kinetic for Kinetic series.
-    
+            3 or "K" or False means Kinetic series.
+
         Raises:
             ValueError: If the mode is out of range.
-    
+
         Returns:
             Response from Andor.
         """
-        
         if mode in ["S", 1, True]:
             mode = 1
         elif mode in ["K", 3, False]:
             mode = 3
         else:
-            raise ValueError("Invalid mode. Use 'S', 'K', 1, 3, True, or False.") 
-    
+            raise ValueError("Invalid mode. Use 'S', 'K', 1, 3, True, or False.")
+
         body = "{:.0f}".format(mode)
         header = 'SAM '
-        cmd = header + body + self.tcp.termination_char
-    
-        self.tcp.cmd_send(cmd)
-        result = self.tcp.recv_until()
-        
-        if prt: 
+        cmd = header + body
+
+        result = self._query(cmd)
+
+        if prt:
             print('\n' + result)
         return result
-    
+
     def acqfreq_set(self, freq, prt=if_print):
         """
-        Sets the freq of acquisition in kHz - 0  or "2000" means 2 MHz
-                                           1 or "1000" means 
-                                           
+        Sets the freq of acquisition in kHz:
+            0 or "2000" means 2 MHz
+            1 or "1000" means 1 MHz
+            2 or "50" means 50 kHz
 
         Raises:
-            ValueError: If the time is out of range 
+            ValueError: If the frequency is out of range
 
         Returns:
             response from Andor
         """
-        
         if freq in ["50", 2, 50]:
             freq = 2
         elif freq in ["1000", 1, 1000]:
             freq = 1
-        elif freq in ["2000", 0,2000]:
+        elif freq in ["2000", 0, 2000]:
             freq = 0
         else:
-            raise ValueError("Invalid freq. Use '50', '1000', '2000' or  2, 1, 0 or 50, 1000, 2000") 
+            raise ValueError("Invalid freq. Use '50', '1000', '2000' or 2, 1, 0 or 50, 1000, 2000")
 
-        body="{:.0f}".format(freq)
+        body = "{:.0f}".format(freq)
         header = 'SHS '
-        cmd = header + body +self.tcp.termination_char
+        cmd = header + body
 
-        self.tcp.cmd_send(cmd)
-        result= self.tcp.recv_until()
-        
-        if prt: 
+        result = self._query(cmd)
+
+        if prt:
             print('\n' + result)
         return result
-        
-    
+
     def acquisition_set(self, prt=if_print):
         """
-        Starts the acquisition with the preselected parameters and returns the data as a DataFrame with two columns.
-    
+        Starts the acquisition with the preselected parameters and returns the
+        data as a DataFrame with two columns.
+
         Raises:
             ValueError: If the response "OK AQD" is not received.
-        
+
         Returns:
-            pandas.DataFrame: A DataFrame with columns:
-                'Wavelength (nm)' (float) and 'Counts' (int).
+            pandas.DataFrame: columns 'Wavelength (nm)' and 'Counts'.
         """
         header = 'AQD '
         body = ""
-        cmd = header + body + self.tcp.termination_char
-    
-        self.tcp.cmd_send(cmd)
-        result = self.tcp.recv_until()
-    
+        cmd = header + body
+
+        result = self._query(cmd)
+
         elements = result.split()
         response = " ".join(elements[:2])
         expected_string = "OK AQD"
-        
+
         if response != expected_string:
             raise ValueError(f"Error: Expected '{expected_string}', but got '{response}'.")
-    
+
         ar_length = int(elements[2])
         column_1 = elements[3:(3 + ar_length)]
         column_2 = elements[3 + ar_length:]
-    
-        # Convert column_1 to floats and column_2 to integers
+
         column_1 = [float(x) for x in column_1]
-        column_2 = [int(float(x)) for x in column_2]  # Convert to float first, then to int
-    
-        # Create a DataFrame with two columns
+        column_2 = [int(float(x)) for x in column_2]
+
         df = pd.DataFrame({
             'Wavelength (nm)': column_1,
             'Counts': column_2
         })
-    
+
         if prt:
             print('\n' + response)
-        
+
         return df
-    
+
     def kinser_start(self, prt=if_print):
         """
         Starts the kinetic series and waits for the response.
-    
+
         Raises:
             ValueError: If the response "OK AQR" is not received.
-        
-        Returns:
-            pandas.DataFrame: A DataFrame with columns:
-                'Wavelength (nm)' (float) and 'Counts' (int).
         """
         header = 'AQR '
         body = ""
-        cmd = header + body + self.tcp.termination_char
-    
-        self.tcp.cmd_send(cmd)
-        result = self.tcp.recv_until()
-    
+        cmd = header + body
+
+        result = self._query(cmd)
+
         elements = result.split()
         response = " ".join(elements[:2])
         expected_string = "OK AQR"
-        
+
         if response != expected_string:
             raise ValueError(f"Error: Expected '{expected_string}', but got '{response}'.")
-    
+
+        if prt:
+            print('\n' + response)
+
+        return result
 
     def settings_get(self, prt=if_print):
         """
         Gets the settings of the spectrograph.
-    
+
         Raises:
             ValueError: If the response "OK GST" is not received.
-        
+
         Returns:
-            pandas.DataFrame: A DataFrame with columns:
-                '3 DIGIT code' (STRING) and 'Value' (float).
+            pandas.DataFrame: columns 'Code' and 'Value'.
         """
         header = 'GST '
         body = ""
-        cmd = header + body + self.tcp.termination_char
-    
-        self.tcp.cmd_send(cmd)
-        result = self.tcp.recv_until()
-    
+        cmd = header + body
+
+        result = self._query(cmd)
+
         elements = result.split()
         response = " ".join(elements[:2])
         expected_string = "OK GST"
-        
+
         if response != expected_string:
             raise ValueError(f"Error: Expected '{expected_string}', but got '{response}'.")
-    
+
         column_1 = elements[1::2]
         column_2 = elements[2::2]
-    
-        # Convert column_1 to floats and column_2 to integers
-        column_2 = [float(x) for x in column_2]  # Convert to float first, then to int
-    
-        # Create a DataFrame with two columns
+
+        column_2 = [float(x) for x in column_2]
+
         df = pd.DataFrame({
             'Code': column_1,
             'Value': column_2
         })
-    
+
         if prt:
             print('\n' + response)
-        
+
         return df
