@@ -21,29 +21,69 @@ from io import StringIO  # Import StringIO for in-memory text handling
 from .log_utils import apply_logging, init_logger
 from scipy.interpolate import interp1d
 
+MATISSE_COMMANDS = {
+    "Power diode (V)": "DPOW:DC?",
+    "Thin etalon reflex (V)": "TE:DC?",
+    "BiFi motor position (steps)": "MOTBI:POS?",
+    "Thin etalon motor position (steps)": "MOTTE:POS?",
+    "Piezo etalon baseline": "PZETL:BASE?",
+    "Slow piezo position": "SPZT:NOW?",
+    "Scan current position": "SCAN:NOW?",
+    "Scan active": "SCAN:STA?",
+}
+
 @apply_logging
 class photon_meas:
-    def __init__(self, connect,connect2=None, connect3=None, logging=True,dig_port=2 ): #connect2 = andor 
+    def __init__(
+        self,
+        connect,
+        connect2=None,          # connect2 = Andor
+        connect3=None,
+        wlm=None,               # HighFinesse WavelengthMeter object, already opened
+        matisse_laser=None,     # Sirah Matisse object, already opened
+        wlm_channel=0,
+        auto_extra_header=True,
+        logging=True,
+        dig_port=2,
+    ):
         self.connect = connect
-        self.connect2=connect2
-        self.connect3=connect3
+        self.connect2 = connect2
+        self.connect3 = connect3
+
+        # ---------- Optional external devices ----------
+        # These are expected to be already opened in the notebook/script.
+        # The class only uses them; it does not open or close them.
+        self.wlm = wlm
+        self.matisse_laser = matisse_laser
+        self.wlm_channel = wlm_channel
+
+        # If True, spectrum() automatically adds WLM/Matisse header
+        # whenever self.wlm and/or self.matisse_laser exist.
+        self.auto_extra_header = auto_extra_header
+
         self.logging_enabled = logging
-        self.dig_port = dig_port #digital port on nanonis RT controller receiving fire from CCD for photon_map_k A-0,B-1,C-2,D-3
+        self.dig_port = dig_port
+
         try:
-            session_path = self.connect.UtilSessionPathGet().loc['Session path', 0]
+            session_path = self.connect.UtilSessionPathGet().loc["Session path", 0]
             init_logger(session_path)
         except Exception as e:
             print(f"Failed to initialize logger: {e}")
-        
+
         if connect2 is not None:
             try:
-                self.andor_settings=self.connect2.settings_get()
-            except:
-                self.andor_settings=None
-        self.signal_names = self.connect.SignalsNamesGet() 
+                self.andor_settings = self.connect2.settings_get()
+            except Exception:
+                self.andor_settings = None
+        else:
+            self.andor_settings = None
+
+        self.signal_names = self.connect.SignalsNamesGet()
+
         # Initialize URL placeholders
         self.url_cal = None
         self.kinser_dat = None
+
         return
     def clear_line(self):
         sys.stdout.write("\033[K") 
@@ -1217,8 +1257,218 @@ class photon_meas:
                         
         return data, sigvals2  
 
-    def spectrum(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None,readmode=0,extra_header=None):# spectrum with only saving the relevant channels and using np array to store nanonis data
+    def spectrum(self,acqtime=10,acqnum=1,name="LS-man",user="Jirka",signal_names=None,readmode=0,
+        extra_header=None, auto_extra_header=None, wavemeter_header=True, matisse_header=True, matisse_commands=None,
+        ):
+        """
+        Spectrum with saving of relevant Nanonis channels and Andor spectrum.
+    
+        If auto_extra_header is True, WLM/Matisse metadata are automatically added
+        when self.wlm and/or self.matisse_laser exist.
+        """
+    
+        name = "AA" + name
+    
+        # ---------- automatic WLM/Matisse header ----------
+        if auto_extra_header is None:
+            auto_extra_header = getattr(self, "auto_extra_header", True)
+    
+        if extra_header is None:
+            extra_header = {}
+    
+        if auto_extra_header:
+            extra_header = self.get_laser_extra_header(
+                extra_header=extra_header,
+                wavemeter=wavemeter_header,
+                matisse=matisse_header,
+                matisse_commands=matisse_commands,
+            )
+    
+        # ---------- initialize ----------
+        self.connect2.acqtime_set(acqtime)
+    
+        folder = self.connect.UtilSessionPathGet().loc["Session path", 0]
+    
+        self.andor_settings = (
+            self.andor_settings
+            if readmode == "KEEP" and self.andor_settings is not None
+            else self.connect2.settings_get()
+        )
+    
+        settings = self.andor_settings
+        signal_names_df = self.signal_names
+    
+        relevant_indices, matching_signals = self.extract_relevant_indices(
+            signal_names_df, signal_names_for_save=signal_names
+        )
+    
+        nanonis_array = np.full((acqnum, len(relevant_indices)), np.nan, dtype=np.float64)
+    
+        # ---------- set Andor read mode if needed ----------
+        if readmode != "KEEP":
+            for index, row in settings.iterrows():
+                code = row["Code"]
+                value = row["Value"]
+    
+                if code == "GRM":
+                    if value == 4:
+                        print(f"Camera in IMAGE mode (4), switching to {readmode} mode.")
+                        self.connect2.readmode_set(readmode)
+                        settings.at[index, "Value"] = readmode
+    
+                    elif value != readmode:
+                        print(f"Changing readmode from {value} to {readmode}.")
+                        self.connect2.readmode_set(readmode)
+                        settings.at[index, "Value"] = readmode
+    
+                elif code == "GAM" and value != 1:
+                    print(f"Acq. mode with value {value} invalid, setting it to single (1) mode.")
+                    self.connect2.acqmode_set(1)
+                    settings.at[index, "Value"] = 1
+    
+        data_dict = {}
+    
+        try:
+            for i in range(int(acqnum)):
+                acquisition_complete_connect = threading.Event()
+                acquisition_complete_connect2 = threading.Event()
+    
+                data_storage = {}
+                signal_values = []
+    
+                acquire_thread2 = threading.Thread(
+                    target=self.acquire_data_from_connect2,
+                    args=(data_storage, acquisition_complete_connect2),
+                )
+                acquire_thread_connect = threading.Thread(
+                    target=self.acquire_data_from_connect_relevant,
+                    args=(signal_values, acquisition_complete_connect, acqtime, relevant_indices),
+                )
+    
+                acquire_thread2.start()
+                acquire_thread_connect.start()
+    
+                acquisition_complete_connect2.wait()
+    
+                acquire_thread_connect.join()
+                acquire_thread2.join()
+    
+                if len(signal_values) > 0:
+                    nanonis_array[i, :] = np.nanmean(
+                        np.stack([df.iloc[:, 1].values for df in signal_values]), axis=0
+                    )
+    
+                data_new = data_storage["data"]
+    
+                if i == 0:
+                    data_dict["Wavelength (nm)"] = data_new["Wavelength (nm)"]
+    
+                data_dict[f"Counts nf {i + 1}"] = data_new["Counts"]
+    
+        except KeyboardInterrupt:
+            print("Acquisition interrupted.")
+    
+        finally:
+            # ---------- create Andor data DataFrame ----------
+            if len(data_dict) > 0:
+                valid_count_columns = [
+                    data_dict[f"Counts nf {i + 1}"].to_numpy()
+                    for i in range(acqnum)
+                    if f"Counts nf {i + 1}" in data_dict
+                ]
+    
+                if len(valid_count_columns) > 0:
+                    counts_columns = np.array(valid_count_columns)
+                    data_dict["Counts"] = self.cr_remove(counts_columns, filter_size=5, offset=305).tolist()
+    
+                if "Wavelength (nm)" in data_dict and "Counts" in data_dict:
+                    data_dict = {
+                        **{k: v for k, v in data_dict.items() if k == "Wavelength (nm)"},
+                        "Counts": data_dict["Counts"],
+                        **{k: v for k, v in data_dict.items() if k not in ["Wavelength (nm)", "Counts"]},
+                    }
+    
+                data_df = pd.DataFrame(data_dict)
+    
+            else:
+                data_df = pd.DataFrame()
+    
+            # ---------- header DataFrames ----------
+            formatted_date_str = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    
+            prepend_df = pd.DataFrame({
+                "Signal names": ["Experiment", "Date", "User"],
+                "Value": ["LS", formatted_date_str, user],
+            })
+    
+            nanonis_mean_array = np.nanmean(nanonis_array, axis=0)
+    
+            sigvals_df = pd.DataFrame({
+                "Signal names": matching_signals,
+                "Value": nanonis_mean_array,
+            })
+    
+            filename = self.connect.get_next_filename(name, extension=".dat", folder=folder)
+            print(filename)
+    
+            combined_df = pd.concat([prepend_df, sigvals_df], ignore_index=True)
+            settings_df = settings
+    
+            combined_df = combined_df.map(
+                lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
+            )
+    
+            # ---------- write file ----------
+            with open(filename, "w") as f:
+                combined_df.to_csv(f, sep="\t", header=False, index=False, lineterminator="\n")
+                settings_df.to_csv(f, sep="\t", header=False, index=False, lineterminator="\n")
+    
+                if extra_header:
+                    extra_header_df = pd.DataFrame(
+                        [(str(k), v) for k, v in extra_header.items()],
+                        columns=["Signal names", "Value"],
+                    )
+                    extra_header_df = extra_header_df.map(
+                        lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
+                    )
+                    extra_header_df.to_csv(f, sep="\t", header=False, index=False, lineterminator="\n")
+    
+                f.write("\n[DATA]\n")
+                data_df.to_csv(f, sep="\t", header=True, index=False, lineterminator="\n")
+    
+        return sigvals_df, combined_df, prepend_df
+
+
+    
+    def spectrum_old2(self, acqtime=10, acqnum=1, name="LS-man", user="Jirka",signal_names=None,readmode=0,
+                 extra_header=None,auto_extra_header=None,wavemeter_header=True,matisse_header=True,matisse_commands=None,):
+        """
+        Spectrum with saving of relevant Nanonis channels and Andor spectrum.
+    
+        extra_header:
+            Manual dictionary added to file header.
+    
+        auto_extra_header:
+            If True, automatically adds WLM/Matisse metadata if self.wlm and/or
+            self.matisse_laser exist. If None, uses self.auto_extra_header.
+        """
         name="AA"+name
+                     
+        # ---------- decide automatic laser/wavemeter header ----------
+        if auto_extra_header is None:
+            auto_extra_header = getattr(self, "auto_extra_header", True)
+    
+        if extra_header is None:
+            extra_header = {}
+    
+        if auto_extra_header:
+            extra_header = self.get_laser_extra_header(
+                extra_header=extra_header,
+                wavemeter=wavemeter_header,
+                matisse=matisse_header,
+                matisse_commands=matisse_commands,
+            )
+
         # Initialize variables
         self.connect2.acqtime_set(acqtime)
         folder=self.connect.UtilSessionPathGet().loc['Session path', 0]
@@ -1226,7 +1476,6 @@ class photon_meas:
         settings = self.andor_settings #
         signal_names_df=self.signal_names 
         relevant_indices,matching_signals=self.extract_relevant_indices(signal_names_df, signal_names_for_save=signal_names)
-
         if extra_header is None:
             extra_header = {}
         nanonis_shape,andor_shape = (acqnum,len(relevant_indices)),(acqnum,1024)  # For example, if you want to concatenate 5 arrays
@@ -3908,8 +4157,122 @@ Channels=Integer
             mkdir(dirName)
             print("Directory ", dirName,  " Created ")
         return dirName
+
+
+    #################################### wavemeter, matisse helper functions ###################################
+    @staticmethod
+    def _parse_value(x):
+        """
+        Parse Matisse text reply into int, float, or string.
+
+        Examples:
+            '"abc"' -> 'abc'
+            '123'   -> 123
+            '1.23'  -> 1.23
+            'ON'    -> 'ON'
+        """
+        x = str(x).strip()
+
+        if len(x) >= 2 and x[0] == '"' and x[-1] == '"':
+            return x[1:-1]
+
+        try:
+            if "." not in x and "e" not in x.lower():
+                return int(x)
+        except Exception:
+            pass
+
+        try:
+            return float(x)
+        except Exception:
+            return x
+            
+    def matisse_ask(self, cmd):
+        """
+        Send one command to Matisse and parse the reply.
+
+        Requires self.matisse_laser to be an already-open Sirah.SirahMatisse object.
+        """
+        if self.matisse_laser is None:
+            raise RuntimeError("Matisse laser is not connected.")
+
+        self.matisse_laser.write(cmd)
+        return self._parse_value(self.matisse_laser.read())
+
+     def read_wlm_values(self):
+        """
+        Read one snapshot from the HighFinesse wavemeter.
+
+        Returns a dictionary suitable for extra_header or data columns.
+        If no wavemeter is attached, returns an empty dictionary.
+        """
+        values = {}
+
+        if self.wlm is None:
+            return values
+
+        try:
+            ch = self.wlm.channel[self.wlm_channel]
+
+            values["Laser wavelength air (nm)"] = float(ch.wavelength_air)
+            values["WLM temperature (C)"] = float(self.wlm.temperature)
+            values["WLM pressure (mbar)"] = float(self.wlm.pressure)
+
+        except Exception as e:
+            values["WLM read failed"] = f"{type(e).__name__}: {e}"
+
+        return values
+         
+    def get_laser_extra_header(
+        self,
+        extra_header=None,
+        wavemeter=True,
+        matisse=True,
+        matisse_commands=None,
+    ):
+        """
+        Merge user-provided extra_header with optional WLM/Matisse metadata.
+
+        If self.wlm exists and wavemeter=True, WLM values are added.
+        If self.matisse_laser exists and matisse=True, Matisse values are added.
+
+        This function is safe if WLM or Matisse are not connected.
+        """
+        if extra_header is None:
+            header = {}
+        else:
+            header = dict(extra_header)
+
+        header["Metadata timestamp"] = datetime.now().isoformat(timespec="seconds")
+
+        if wavemeter:
+            header.update(self.read_wlm_values())
+
+        if matisse:
+            header.update(
+                self.read_matisse_values(
+                    matisse_commands=matisse_commands
+                )
+            )
+
+        return header
+
+    @staticmethod
+    def _merge_extra_header(signals_header, extra_header):
+        """
+        Merge extra_header dictionary into signals_header dictionary.
+
+        Keeps the code in spectrum() shorter.
+        """
+        if extra_header is None:
+            return signals_header
+
+        for key, value in extra_header.items():
+            signals_header[key] = value
+
+        return signals_header
     
-    #################################### BIAS SPECTROSCOPY ###################################3
+    #################################### BIAS SPECTROSCOPY ###################################
     def bias_spectr_par_get(self):
         bias_par = {'Bias': self.connect.BiasGet(),
                     'BiasSpectrChs': self.connect.BiasSpectrChsGet(),
