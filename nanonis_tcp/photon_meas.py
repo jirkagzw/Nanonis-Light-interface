@@ -1277,7 +1277,10 @@ class photon_meas:
         if extra_header is None:
             extra_header = {}
     
-        if auto_extra_header:
+        if auto_extra_header and (
+            (wavemeter_header and getattr(self, "wlm", None) is not None)
+            or (matisse_header and getattr(self, "matisse_laser", None) is not None)
+        ):
             extra_header = self.get_laser_extra_header(
                 extra_header=extra_header,
                 wavemeter=wavemeter_header,
