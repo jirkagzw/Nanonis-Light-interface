@@ -4163,7 +4163,7 @@ Channels=Integer
 
     #################################### wavemeter, matisse helper functions ###################################
     @staticmethod
-    def dataframe_map_compat(df, func):
+    def dataframe_map_compat(self,df, func):
         """
         Apply a function element-wise to a pandas DataFrame.
     
