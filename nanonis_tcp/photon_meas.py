@@ -1184,7 +1184,7 @@ class photon_meas:
             
             # Format the DataFrame in one go
             format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
-            combined_df = dataframe_map_compat(combined_df, format_float)
+            combined_df = self.dataframe_map_compat(combined_df, format_float)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
@@ -1430,7 +1430,7 @@ class photon_meas:
                         [(str(k), v) for k, v in extra_header.items()],
                         columns=["Signal names", "Value"],
                     )
-                    extra_header_df = dataframe_map_compat(extra_header_df, lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x)
+                    extra_header_df = self.dataframe_map_compat(extra_header_df, lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x)
                     extra_header_df.to_csv(f, sep="\t", header=False, index=False, lineterminator="\n")
     
                 f.write("\n[DATA]\n")
@@ -1589,7 +1589,7 @@ class photon_meas:
             
             # Format the DataFrame in one go
             format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
-            combined_df = dataframe_map_compat(combined_df, format_float)
+            combined_df = self.dataframe_map_compat(combined_df, format_float)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
@@ -1600,7 +1600,7 @@ class photon_meas:
                     extra_header_df = pd.DataFrame(
                         [(str(k), v) for k, v in extra_header.items()],
                         columns=["Signal names", "Value"])
-                    extra_header_df = dataframe_map_compat(extra_header_df, format_float)
+                    extra_header_df = self.dataframe_map_compat(extra_header_df, format_float)
                     extra_header_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")                
                 # Write section header and additional data
                 f.write("\n[DATA]\n")
@@ -1788,7 +1788,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                         
                         # Format the DataFrame in one go
                         format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
-                        combined_df = dataframe_map_compat(combined_df, format_float)
+                        combined_df = self.dataframe_map_compat(combined_df, format_float)
                         
                         # Write all data to a file in one go
                         with open(filename, 'w') as f_text:
@@ -2094,7 +2094,7 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
                         
                         # Format the DataFrame in one go
                         format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
-                        combined_df = dataframe_map_compat(combined_df, format_float)
+                        combined_df = self.dataframe_map_compat(combined_df, format_float)
                         
                         # Write all data to a file in one go
                         with open(filename, 'w') as f_text:
@@ -4162,7 +4162,7 @@ Channels=Integer
 
 
     #################################### wavemeter, matisse helper functions ###################################
-
+    @staticmethod
     def dataframe_map_compat(df, func):
         """
         Apply a function element-wise to a pandas DataFrame.
@@ -4213,6 +4213,29 @@ Channels=Integer
 
         self.matisse_laser.write(cmd)
         return self._parse_value(self.matisse_laser.read())
+
+    def read_matisse_values(self, matisse_commands=None):
+        """
+        Read one snapshot from the Sirah Matisse laser.
+    
+        Returns a dictionary suitable for extra_header.
+        If no Matisse laser is attached, returns an empty dictionary.
+        """
+        values = {}
+    
+        if self.matisse_laser is None:
+            return values
+    
+        if matisse_commands is None:
+            matisse_commands = MATISSE_COMMANDS
+    
+        for key, cmd in matisse_commands.items():
+            try:
+                values[key] = self.matisse_ask(cmd)
+            except Exception as e:
+                values[f"{key} read failed"] = f"{type(e).__name__}: {e}"
+    
+        return values
 
     def read_wlm_values(self):
         """
