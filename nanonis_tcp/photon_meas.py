@@ -1184,7 +1184,7 @@ class photon_meas:
             
             # Format the DataFrame in one go
             format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
-            combined_df = self.(combined_df, format_float)
+            combined_df = self.dataframe_map_compat(combined_df, format_float)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
