@@ -1183,7 +1183,8 @@ class photon_meas:
             data_df = data
             
             # Format the DataFrame in one go
-            combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+            format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
+            combined_df = dataframe_map_compat(combined_df, format_float)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
@@ -1414,9 +1415,7 @@ class photon_meas:
             combined_df = pd.concat([prepend_df, sigvals_df], ignore_index=True)
             settings_df = settings
     
-            combined_df = combined_df.map(
-                lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
-            )
+            combined_df = dataframe_map_compat(combined_df, lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x)
     
             # ---------- write file ----------
             with open(filename, "w") as f:
@@ -1428,9 +1427,7 @@ class photon_meas:
                         [(str(k), v) for k, v in extra_header.items()],
                         columns=["Signal names", "Value"],
                     )
-                    extra_header_df = extra_header_df.map(
-                        lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
-                    )
+                    extra_header_df = dataframe_map_compat(extra_header_df, lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x)
                     extra_header_df.to_csv(f, sep="\t", header=False, index=False, lineterminator="\n")
     
                 f.write("\n[DATA]\n")
@@ -1588,7 +1585,8 @@ class photon_meas:
             data_df = data
             
             # Format the DataFrame in one go
-            combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+            format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
+            combined_df = dataframe_map_compat(combined_df, format_float)
             
             # Write all data to a file in one go
             with open(filename, 'w') as f:
@@ -1599,8 +1597,7 @@ class photon_meas:
                     extra_header_df = pd.DataFrame(
                         [(str(k), v) for k, v in extra_header.items()],
                         columns=["Signal names", "Value"])
-                    extra_header_df = extra_header_df.map(
-                        lambda x: '{:.7E}'.format(x) if isinstance(x, (float, np.floating)) else x)
+                    extra_header_df = dataframe_map_compat(extra_header_df, format_float)
                     extra_header_df.to_csv(f, sep='\t', header=False, index=False, lineterminator="\n")                
                 # Write section header and additional data
                 f.write("\n[DATA]\n")
@@ -1787,7 +1784,8 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
 
                         
                         # Format the DataFrame in one go
-                        combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+                        format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
+                        combined_df = dataframe_map_compat(combined_df, format_float)
                         
                         # Write all data to a file in one go
                         with open(filename, 'w') as f_text:
@@ -2092,7 +2090,8 @@ Grid settings={";".join([f'{val:.6E}' for val in grid_settings])}
 
                         
                         # Format the DataFrame in one go
-                        combined_df = combined_df.map(lambda x: '{:.7E}'.format(x) if isinstance(x, float) else x)
+                        format_float = lambda x: "{:.7E}".format(x) if isinstance(x, (float, np.floating)) else x
+                        combined_df = dataframe_map_compat(combined_df, format_float)
                         
                         # Write all data to a file in one go
                         with open(filename, 'w') as f_text:
@@ -4160,6 +4159,19 @@ Channels=Integer
 
 
     #################################### wavemeter, matisse helper functions ###################################
+
+    def dataframe_map_compat(df, func):
+        """
+        Apply a function element-wise to a pandas DataFrame.
+    
+        Compatible with:
+        - pandas <= 2.0: DataFrame.applymap()
+        - pandas >= 2.1: DataFrame.map()
+        """
+        if hasattr(df, "map"):
+            return df.map(func)
+        return df.applymap(func)
+        
     @staticmethod
     def _parse_value(x):
         """
@@ -4199,7 +4211,7 @@ Channels=Integer
         self.matisse_laser.write(cmd)
         return self._parse_value(self.matisse_laser.read())
 
-     def read_wlm_values(self):
+    def read_wlm_values(self):
         """
         Read one snapshot from the HighFinesse wavemeter.
 
